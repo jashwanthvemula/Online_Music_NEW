@@ -1,0 +1,9 @@
+"User ID","First Name","Last Name","Email","Admin","Created At","Playlists Count","Listening Count"
+8,"jashwanth","","jashwanth12@gmail.com","No","2025-04-25 14:03:01",1,1
+7,"jashwanth","","jashwanth1234@gmail.com","No","2025-04-20 12:34:10",2,2
+6,"jashwanth","","jashwanth123@gmail.com","No","2025-04-08 22:56:20",2,11
+1,"Admin","User","admin@music.com","Yes","2025-04-08 22:39:33",1,1
+2,"John","Doe","john@example.com","No","2025-04-08 22:39:33",0,8
+3,"Jane","Smith","jane@example.com","No","2025-04-08 22:39:33",0,14
+4,"Alice","Johnson","alice@example.com","No","2025-04-08 22:39:33",0,6
+5,"Bob","Williams","bob@example.com","No","2025-04-08 22:39:33",0,4

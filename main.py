@@ -12,8 +12,8 @@ import threading
 import time
 
 # Import from other modules
-from config import UI_CONFIG, COLORS, DB_CONFIG, APP_CONFIG
-from utils import ensure_directories_exist, connect_db_server, connect_db
+from db_config import UI_CONFIG, COLORS, DB_CONFIG, APP_CONFIG
+from db_utils import ensure_directories_exist, connect_db_server, connect_db
 
 # ------------------- Database Setup Functions -------------------
 def create_database():

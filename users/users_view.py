@@ -1,13 +1,3 @@
-"""
-User views for the Online Music Player application.
-Handles all user-facing screens including:
-- Home page
-- Search page
-- Playlist page
-- Download page
-- Recommendations page
-"""
-
 import os
 import sys
 import subprocess
@@ -22,12 +12,49 @@ import io
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import from other modules
-from config import UI_CONFIG, COLORS, APP_CONFIG
-from utils import connect_db, get_current_user, ensure_directories_exist, format_file_size, create_song_card
+try:
+    from db_config import UI_CONFIG, COLORS, APP_CONFIG
+    from db_utils import connect_db, get_current_user, ensure_directories_exist, format_file_size, create_song_card
+    USE_CONFIG = True
+except ImportError:
+    print("Warning: db_config.py or db_utils.py not found. Using fallback settings.")
+    USE_CONFIG = False
+    # Modernized color scheme
+    COLORS = {
+        "primary": "#8B5CF6",     # Vibrant purple
+        "primary_hover": "#7C3AED",
+        "secondary": "#3B82F6",   # Bright blue
+        "secondary_hover": "#2563EB",
+        "success": "#10B981",     # Emerald green
+        "success_hover": "#059669",
+        "danger": "#EF4444",      # Red
+        "danger_hover": "#DC2626",
+        "warning": "#F59E0B",     # Amber
+        "warning_hover": "#D97706",
+        "background": "#111827",  # Dark gray
+        "sidebar": "#0F172A",     # Slate
+        "content": "#1F2937",     # Gray
+        "card": "#374151",        # Lighter gray
+        "text": "#F3F4F6",        # Light gray
+        "text_secondary": "#9CA3AF" # Gray
+    }
+    
+    # Updated APP_CONFIG
+    APP_CONFIG = {
+        "name": "MusicFlow",
+        "version": "2.0",
+        "temp_dir": "temp",
+        "reports_dir": "reports"
+    }
 
 # Initialize mixer for music playback
 mixer.init()
 
+# Set customtkinter appearance
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+sidebar = None
 # Current song information
 current_song = {
     "id": None,
@@ -36,6 +63,11 @@ current_song = {
     "playing": False,
     "paused": False
 }
+
+# Song queue for navigation
+song_queue = []
+queue_index = -1
+queue_context = None
 
 # ------------------- Data Functions -------------------
 def get_featured_songs(limit=3):
@@ -47,7 +79,6 @@ def get_featured_songs(limit=3):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Get songs with most plays in listening history
         query = """
         SELECT s.song_id, s.title, a.name as artist_name, COUNT(lh.history_id) as play_count 
         FROM Songs s
@@ -61,7 +92,6 @@ def get_featured_songs(limit=3):
         cursor.execute(query, (limit,))
         songs = cursor.fetchall()
         
-        # If no songs with play history, get newest songs
         if not songs:
             query = """
             SELECT s.song_id, s.title, a.name as artist_name 
@@ -149,7 +179,6 @@ def get_song_info(song_id):
 def record_listening_history(song_id):
     """Record that the current user listened to a song"""
     try:
-        # Get current user ID
         with open("current_user.txt", "r") as f:
             user_id = f.read().strip()
             
@@ -184,7 +213,6 @@ def search_songs(query, search_type="all"):
         
         search_param = f"%{query}%"
         
-        # Different queries based on search type
         if search_type == "song":
             query = """
             SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
@@ -207,7 +235,7 @@ def search_songs(query, search_type="all"):
             LEFT JOIN Albums al ON s.album_id = al.album_id
             LEFT JOIN Genres g ON s.genre_id = g.genre_id
             WHERE a.name LIKE %s
-            ORDER BY s.title
+            ORDER BY a.name, s.title
             """
             cursor.execute(query, (search_param,))
             
@@ -220,11 +248,11 @@ def search_songs(query, search_type="all"):
             LEFT JOIN Albums al ON s.album_id = al.album_id
             LEFT JOIN Genres g ON s.genre_id = g.genre_id
             WHERE al.title LIKE %s
-            ORDER BY s.title
+            ORDER BY al.title, s.title
             """
             cursor.execute(query, (search_param,))
             
-        else:  # "all" - search everything
+        else:  # "all"
             query = """
             SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
                    g.name as genre, s.duration
@@ -239,9 +267,8 @@ def search_songs(query, search_type="all"):
         
         songs = cursor.fetchall()
         
-        # Format durations to MM:SS
         for song in songs:
-            minutes, seconds = divmod(song['duration'] or 0, 60)  # Handle None values
+            minutes, seconds = divmod(song['duration'] or 0, 60)
             song['duration_formatted'] = f"{minutes}:{seconds:02d}"
         
         return songs
@@ -257,7 +284,6 @@ def search_songs(query, search_type="all"):
 def get_user_favorite_songs(limit=8):
     """Get the current user's favorite songs"""
     try:
-        # Get current user ID
         with open("current_user.txt", "r") as f:
             user_id = f.read().strip()
             
@@ -267,7 +293,6 @@ def get_user_favorite_songs(limit=8):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Get songs the user has listened to most
         query = """
         SELECT s.song_id, s.title, a.name as artist_name, COUNT(lh.history_id) as play_count,
                g.name as genre_name, s.file_size, s.file_type
@@ -284,7 +309,6 @@ def get_user_favorite_songs(limit=8):
         cursor.execute(query, (user_id, limit))
         songs = cursor.fetchall()
         
-        # Format file sizes to human-readable format
         for song in songs:
             song['file_size_formatted'] = format_file_size(song['file_size'])
             
@@ -307,7 +331,6 @@ def get_popular_songs(limit=8):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Get songs with most plays in listening history
         query = """
         SELECT s.song_id, s.title, a.name as artist_name, COUNT(lh.history_id) as play_count, 
                g.name as genre_name, s.file_size, s.file_type
@@ -323,7 +346,6 @@ def get_popular_songs(limit=8):
         cursor.execute(query, (limit,))
         songs = cursor.fetchall()
         
-        # If no songs with play history, get newest songs
         if not songs:
             query = """
             SELECT s.song_id, s.title, a.name as artist_name, s.file_size, s.file_type,
@@ -337,7 +359,6 @@ def get_popular_songs(limit=8):
             cursor.execute(query, (limit,))
             songs = cursor.fetchall()
             
-        # Format file sizes to human-readable format
         for song in songs:
             song['file_size_formatted'] = format_file_size(song['file_size'])
             
@@ -354,15 +375,12 @@ def get_popular_songs(limit=8):
 def get_recommended_songs(limit=8):
     """Get songs recommended based on user's listening history"""
     try:
-        # Get current user ID
         with open("current_user.txt", "r") as f:
             user_id = f.read().strip()
         
-        # Get favorite genres and artists
         favorite_genres = get_favorite_genres()
         favorite_artists = get_favorite_artists()
         
-        # No history yet, return random songs
         if not favorite_genres and not favorite_artists:
             return get_random_songs(limit)
             
@@ -372,14 +390,12 @@ def get_recommended_songs(limit=8):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Get songs the user has already listened to
         cursor.execute(
             "SELECT song_id FROM Listening_History WHERE user_id = %s",
             (user_id,)
         )
         listened_songs = [row['song_id'] for row in cursor.fetchall()]
         
-        # Build genre filter
         genre_filter = ""
         genre_params = []
         if favorite_genres:
@@ -388,7 +404,6 @@ def get_recommended_songs(limit=8):
             genre_filter = f"OR s.genre_id IN ({placeholders})"
             genre_params = genre_ids
         
-        # Build artist filter
         artist_filter = ""
         artist_params = []
         if favorite_artists:
@@ -397,7 +412,6 @@ def get_recommended_songs(limit=8):
             artist_filter = f"OR s.artist_id IN ({placeholders})"
             artist_params = artist_ids
         
-        # Exclude songs the user has already heard
         exclusion_filter = ""
         exclusion_params = []
         if listened_songs:
@@ -405,12 +419,10 @@ def get_recommended_songs(limit=8):
             exclusion_filter = f"AND s.song_id NOT IN ({placeholders})"
             exclusion_params = listened_songs
         
-        # If user hasn't listened to any songs, don't use the exclusion filter
         if not listened_songs:
             exclusion_filter = ""
             exclusion_params = []
         
-        # Query for recommendations based on genres and artists
         query = f"""
         SELECT s.song_id, s.title, a.name as artist_name, g.name as genre_name
         FROM Songs s
@@ -425,27 +437,18 @@ def get_recommended_songs(limit=8):
         cursor.execute(query, all_params)
         recommendations = cursor.fetchall()
         
-        # If we don't have enough recommendations, fill with random songs
         if len(recommendations) < limit:
             remaining = limit - len(recommendations)
-            
-            # Get IDs of already recommended songs
             recommended_ids = [song['song_id'] for song in recommendations]
-            
-            # Add listened songs to the exclusion list
             excluded_songs = recommended_ids + listened_songs if listened_songs else recommended_ids
-            
-            # Get random songs excluding those already recommended or listened to
             random_songs = get_random_songs(remaining, excluded_songs)
-            
-            # Combine recommendations
             recommendations.extend(random_songs)
         
         return recommendations
         
     except Exception as e:
         print(f"Error getting recommendations: {e}")
-        return get_random_songs(limit)  # Fallback to random songs
+        return get_random_songs(limit)
     finally:
         if 'connection' in locals() and connection and connection.is_connected():
             cursor.close()
@@ -454,7 +457,6 @@ def get_recommended_songs(limit=8):
 def get_favorite_genres():
     """Get user's favorite genres based on listening history"""
     try:
-        # Get current user ID
         with open("current_user.txt", "r") as f:
             user_id = f.read().strip()
             
@@ -491,7 +493,6 @@ def get_favorite_genres():
 def get_favorite_artists():
     """Get user's favorite artists based on listening history"""
     try:
-        # Get current user ID
         with open("current_user.txt", "r") as f:
             user_id = f.read().strip()
             
@@ -534,7 +535,6 @@ def get_random_songs(limit=8, exclude_ids=None):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Exclude songs if specified
         exclusion_filter = ""
         params = []
         
@@ -557,7 +557,6 @@ def get_random_songs(limit=8, exclude_ids=None):
         cursor.execute(query, params)
         songs = cursor.fetchall()
         
-        # If no songs in database yet, return dummy data
         if not songs:
             songs = [
                 {"song_id": 1, "title": "Blinding Lights", "artist_name": "The Weeknd", "genre_name": "Pop"},
@@ -565,7 +564,6 @@ def get_random_songs(limit=8, exclude_ids=None):
                 {"song_id": 3, "title": "Believer", "artist_name": "Imagine Dragons", "genre_name": "Rock"},
                 {"song_id": 4, "title": "Shape of You", "artist_name": "Ed Sheeran", "genre_name": "Pop"}
             ]
-            # Shuffle and limit
             random.shuffle(songs)
             songs = songs[:limit]
         
@@ -579,21 +577,180 @@ def get_random_songs(limit=8, exclude_ids=None):
             cursor.close()
             connection.close()
 
+def create_playlist(name, description=""):
+    """Create a new playlist for the current user"""
+    try:
+        with open("current_user.txt", "r") as f:
+            user_id = f.read().strip()
+            
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        
+        query = "INSERT INTO Playlists (user_id, name, description) VALUES (%s, %s, %s)"
+        cursor.execute(query, (user_id, name, description))
+        connection.commit()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error creating playlist: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def get_user_playlists():
+    """Get all playlists for the current user"""
+    try:
+        with open("current_user.txt", "r") as f:
+            user_id = f.read().strip()
+            
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+        SELECT playlist_id, name, description, created_at
+        FROM Playlists
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        """
+        
+        cursor.execute(query, (user_id,))
+        playlists = cursor.fetchall()
+        
+        return playlists
+        
+    except Exception as e:
+        print(f"Error fetching playlists: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def get_playlist_songs(playlist_id):
+    """Get all songs in a specific playlist"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+        SELECT s.song_id, s.title, a.name as artist_name, g.name as genre_name
+        FROM Playlist_Songs ps
+        JOIN Songs s ON ps.song_id = s.song_id
+        JOIN Artists a ON s.artist_id = a.artist_id
+        LEFT JOIN Genres g ON s.genre_id = g.genre_id
+        WHERE ps.playlist_id = %s
+        ORDER BY ps.position
+        """
+        
+        cursor.execute(query, (playlist_id,))
+        songs = cursor.fetchall()
+        
+        return songs
+        
+    except Exception as e:
+        print(f"Error fetching playlist songs: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def add_song_to_playlist(playlist_id, song_id):
+    """Add a song to a playlist"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        
+        cursor.execute("SELECT MAX(position) FROM Playlist_Songs WHERE playlist_id = %s", (playlist_id,))
+        max_position = cursor.fetchone()[0]
+        position = (max_position or 0) + 1
+        
+        query = "INSERT INTO Playlist_Songs (playlist_id, song_id, position) VALUES (%s, %s, %s)"
+        cursor.execute(query, (playlist_id, song_id, position))
+        connection.commit()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error adding song to playlist: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def remove_song_from_playlist(playlist_id, song_id):
+    """Remove a song from a playlist"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        
+        query = "DELETE FROM Playlist_Songs WHERE playlist_id = %s AND song_id = %s"
+        cursor.execute(query, (playlist_id, song_id))
+        connection.commit()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error removing song from playlist: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def delete_playlist(playlist_id):
+    """Delete a playlist"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        
+        query = "DELETE FROM Playlists WHERE playlist_id = %s"
+        cursor.execute(query, (playlist_id,))
+        connection.commit()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting playlist: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
 def download_song(song_id):
     """Download a song to local storage"""
     try:
-        # Get song data
         song_data = get_song_data(song_id)
         if not song_data:
             messagebox.showerror("Error", "Could not retrieve song data")
             return False
         
-        # Format the filename
         filename = f"{song_data['artist']} - {song_data['title']}.{song_data['type']}"
-        # Replace invalid filename characters
         filename = filename.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
         
-        # Ask user for download location
         downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         save_path = filedialog.asksaveasfilename(
             initialdir=downloads_dir,
@@ -602,10 +759,9 @@ def download_song(song_id):
             filetypes=[(f"{song_data['type'].upper()} files", f"*.{song_data['type']}"), ("All files", "*.*")]
         )
         
-        if not save_path:  # User cancelled
+        if not save_path:
             return False
         
-        # Write song data to file
         with open(save_path, 'wb') as f:
             f.write(song_data['data'])
         
@@ -618,32 +774,43 @@ def download_song(song_id):
         return False
 
 # ------------------- Music Player Functions -------------------
-def play_song(song_id):
-    """Play a song from its binary data in the database"""
-    global current_song
+def play_song(song_id, context=None, songs_list=None):
+    """Play a song from its binary data in the database and manage queue"""
+    global current_song, song_queue, queue_index, queue_context
     
     try:
-        # Get song data from database
         song_data = get_song_data(song_id)
         if not song_data:
             messagebox.showerror("Error", "Could not retrieve song data")
             return False
             
-        # Create a temporary file to play the song
+        # Update song queue based on context
+        if context and songs_list:
+            if queue_context != context or not song_queue:
+                song_queue = songs_list
+                queue_context = context
+            queue_index = next((i for i, song in enumerate(song_queue) if song['song_id'] == song_id), -1)
+        else:
+            # If no context, maintain current queue or start with featured songs
+            if not song_queue or queue_context != 'single':
+                song_queue = get_featured_songs(3)
+                queue_context = 'single'
+            queue_index = next((i for i, song in enumerate(song_queue) if song['song_id'] == song_id), -1)
+            if queue_index == -1:
+                song_queue.append({'song_id': song_id, 'title': song_data['title'], 'artist_name': song_data['artist']})
+                queue_index = len(song_queue) - 1
+        
         temp_dir = APP_CONFIG["temp_dir"]
         os.makedirs(temp_dir, exist_ok=True)
         
         temp_file = os.path.join(temp_dir, f"song_{song_id}.{song_data['type']}")
         
-        # Write binary data to temp file
         with open(temp_file, 'wb') as f:
             f.write(song_data['data'])
             
-        # Load and play the song
         mixer.music.load(temp_file)
         mixer.music.play()
         
-        # Update current song info
         current_song = {
             "id": song_id,
             "title": song_data["title"],
@@ -652,10 +819,7 @@ def play_song(song_id):
             "paused": False
         }
         
-        # Update UI elements
         update_now_playing_display()
-        
-        # Record in listening history
         record_listening_history(song_id)
         
         return True
@@ -670,30 +834,44 @@ def toggle_play_pause():
     global current_song
     
     if current_song["id"] is None:
-        # No song loaded - try to play first featured song
         featured_songs = get_featured_songs(1)
         if featured_songs:
-            play_song(featured_songs[0]['song_id'])
+            play_song(featured_songs[0]['song_id'], context='featured', songs_list=featured_songs)
     elif current_song["paused"]:
-        # Resume paused song
         mixer.music.unpause()
         current_song["paused"] = False
         current_song["playing"] = True
         update_now_playing_display()
     elif current_song["playing"]:
-        # Pause playing song
         mixer.music.pause()
         current_song["paused"] = True
         current_song["playing"] = False
         update_now_playing_display()
 
 def play_next_song():
-    """Placeholder for playing next song"""
-    messagebox.showinfo("Info", "Next song feature will be implemented with playlists")
+    """Play the next song in the queue"""
+    global queue_index, song_queue
+    
+    if not song_queue or queue_index < 0:
+        messagebox.showinfo("Info", "No songs in the queue.")
+        return
+    
+    queue_index = min(queue_index + 1, len(song_queue) - 1)
+    if queue_index < len(song_queue):
+        play_song(song_queue[queue_index]['song_id'], context=queue_context, songs_list=song_queue)
+    else:
+        messagebox.showinfo("Info", "End of queue reached.")
 
 def play_previous_song():
-    """Placeholder for playing previous song"""
-    messagebox.showinfo("Info", "Previous song feature will be implemented with playlists")
+    """Play the previous song in the queue"""
+    global queue_index, song_queue
+    
+    if not song_queue or queue_index < 0:
+        messagebox.showinfo("Info", "No songs in the queue.")
+        return
+    
+    queue_index = max(queue_index - 1, 0)
+    play_song(song_queue[queue_index]['song_id'], context=queue_context, songs_list=song_queue)
 
 def update_now_playing_display():
     """Update the now playing display in the UI"""
@@ -708,670 +886,1026 @@ def update_now_playing_display():
             play_btn.configure(text="⏸️")
 
 # ------------------- UI Creation Functions -------------------
+def update_sidebar_active_page(active_page):
+    """Update sidebar button colors to highlight the active page"""
+    global sidebar, sidebar_buttons
+    if sidebar is None or not sidebar_buttons:
+        return
+    
+    for btn in sidebar_buttons:
+        btn.configure(fg_color="transparent", text_color=COLORS["text"])
+    
+    page_index = {
+        "home": 0,
+        "search": 1,
+        "playlist": 2,
+        "download": 3,
+        "recommend": 4,
+        "trending": 0  # Trending uses home sidebar highlight
+    }.get(active_page, 0)
+    
+    sidebar_buttons[page_index].configure(fg_color=COLORS["primary"], text_color=COLORS["text"])
+
 def create_sidebar(parent_frame, user, active_page="home"):
     """Create the sidebar navigation"""
-    sidebar = ctk.CTkFrame(parent_frame, width=250, height=580, fg_color=COLORS["sidebar"], corner_radius=10)
-    sidebar.pack(side="left", fill="y", padx=(10, 0), pady=10)
-
-    # Sidebar Title
-    title_label = ctk.CTkLabel(sidebar, text="Online Music\nSystem", font=("Arial", 20, "bold"), text_color="white")
-    title_label.pack(pady=(25, 30))
-
-    # Determine button colors based on active page
-    page_colors = {
-        "home": ["white", COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"]],
-        "search": [COLORS["text_secondary"], "white", COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"]],
-        "playlist": [COLORS["text_secondary"], COLORS["text_secondary"], "white", COLORS["text_secondary"], COLORS["text_secondary"]],
-        "download": [COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"], "white", COLORS["text_secondary"]],
-        "recommend": [COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"], COLORS["text_secondary"], "white"]
-    }
+    global sidebar, sidebar_buttons, now_playing_label, play_btn
+    if sidebar is not None:
+        update_sidebar_active_page(active_page)
+        return sidebar
     
-    colors = page_colors.get(active_page, page_colors["home"])
-
-    # Sidebar Menu Items with navigation commands
-    home_btn = ctk.CTkButton(sidebar, text="🏠 Home", font=("Arial", 14), 
-                          fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=colors[0],
-                          anchor="w", corner_radius=0, height=40, command=lambda: show_home_view())
-    home_btn.pack(fill="x", pady=5, padx=10)
-
-    search_btn = ctk.CTkButton(sidebar, text="🔍 Search", font=("Arial", 14), 
-                            fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=colors[1],
-                            anchor="w", corner_radius=0, height=40, command=lambda: show_search_view())
-    search_btn.pack(fill="x", pady=5, padx=10)
-
-    playlist_btn = ctk.CTkButton(sidebar, text="🎵 Playlist", font=("Arial", 14), 
-                              fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=colors[2],
-                              anchor="w", corner_radius=0, height=40, command=lambda: show_playlist_view())
-    playlist_btn.pack(fill="x", pady=5, padx=10)
-
-    download_btn = ctk.CTkButton(sidebar, text="⬇️ Download", font=("Arial", 14), 
-                              fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=colors[3],
-                              anchor="w", corner_radius=0, height=40, command=lambda: show_download_view())
-    download_btn.pack(fill="x", pady=5, padx=10)
-
-    recommend_btn = ctk.CTkButton(sidebar, text="🎧 Recommend Songs", font=("Arial", 14), 
-                                fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=colors[4],
-                                anchor="w", corner_radius=0, height=40, command=lambda: show_recommend_view())
-    recommend_btn.pack(fill="x", pady=5, padx=10)
-
-    logout_btn = ctk.CTkButton(sidebar, text="🚪 Logout", font=("Arial", 14), 
-                             fg_color=COLORS["sidebar"], hover_color="#1E293B", text_color=COLORS["text_secondary"],
-                             anchor="w", corner_radius=0, height=40, command=lambda: open_login_page())
-    logout_btn.pack(fill="x", pady=5, padx=10)
-
-    # Now playing label
-    global now_playing_label
-    now_playing_frame = ctk.CTkFrame(sidebar, fg_color=COLORS["sidebar"], height=40)
+    sidebar = ctk.CTkFrame(parent_frame, width=250, fg_color=COLORS["sidebar"], corner_radius=12)
+    sidebar.pack(side="left", fill="y", padx=(10, 0), pady=10)
+    sidebar.pack_propagate(False)
+    
+    ctk.CTkLabel(
+        sidebar,
+        text=APP_CONFIG["name"],
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(30, 20), padx=20)
+    
+    sidebar_buttons = []
+    
+    nav_items = [
+        ("🏠 Home", show_home_view),
+        ("🔍 Search", show_search_view),
+        ("🎵 Playlists", show_playlist_view),
+        ("⬇️ Downloads", show_download_view),
+        ("🎧 Recommendations", show_recommend_view)
+    ]
+    
+    for text, command in nav_items:
+        btn = ctk.CTkButton(
+            sidebar,
+            text=text,
+            command=command,
+            font=("Inter", 14),
+            fg_color="transparent",
+            hover_color=COLORS["primary_hover"],
+            text_color=COLORS["text"],
+            anchor="w",
+            height=40,
+            corner_radius=8
+        )
+        btn.pack(fill="x", padx=10, pady=5)
+        sidebar_buttons.append(btn)
+    
+    ctk.CTkButton(
+        sidebar,
+        text="🚪 Logout",
+        command=open_login_page,
+        font=("Inter", 14),
+        fg_color=COLORS["danger"],
+        hover_color=COLORS["danger_hover"],
+        height=40,
+        corner_radius=8
+    ).pack(side="bottom", fill="x", padx=10, pady=20)
+    
+    now_playing_frame = ctk.CTkFrame(sidebar, fg_color=COLORS["sidebar"], corner_radius=8)
     now_playing_frame.pack(side="bottom", fill="x", pady=(0, 10), padx=10)
     
-    now_playing_label = ctk.CTkLabel(now_playing_frame, 
-                                   text="Now Playing: No song playing", 
-                                   font=("Arial", 12), 
-                                   text_color=COLORS["text_secondary"],
-                                   wraplength=220)
-    now_playing_label.pack(pady=5)
-
-    # Music player controls at bottom of sidebar
-    player_frame = ctk.CTkFrame(sidebar, fg_color=COLORS["sidebar"], height=50)
-    player_frame.pack(side="bottom", fill="x", pady=10, padx=10)
-
-    # Control buttons with functionality
-    prev_btn = ctk.CTkButton(player_frame, text="⏮️", font=("Arial", 18), 
-                            fg_color=COLORS["sidebar"], hover_color="#1E293B", 
-                            width=40, height=40, command=play_previous_song)
-    prev_btn.pack(side="left", padx=10)
-
-    global play_btn
-    play_btn = ctk.CTkButton(player_frame, text="▶️", font=("Arial", 18), 
-                           fg_color=COLORS["sidebar"], hover_color="#1E293B", 
-                           width=40, height=40, command=toggle_play_pause)
-    play_btn.pack(side="left", padx=10)
-
-    next_btn = ctk.CTkButton(player_frame, text="⏭️", font=("Arial", 18), 
-                           fg_color=COLORS["sidebar"], hover_color="#1E293B", 
-                           width=40, height=40, command=play_next_song)
-    next_btn.pack(side="left", padx=10)
+    now_playing_label = ctk.CTkLabel(
+        now_playing_frame,
+        text="Now Playing: No song playing",
+        font=("Inter", 12),
+        text_color=COLORS["text_secondary"],
+        wraplength=220
+    )
+    now_playing_label.pack(pady=10)
     
+    player_frame = ctk.CTkFrame(sidebar, fg_color=COLORS["sidebar"], corner_radius=8)
+    player_frame.pack(side="bottom", fill="x", pady=10, padx=10)
+    
+    prev_btn = ctk.CTkButton(
+        player_frame,
+        text="⏮️",
+        font=("Inter", 14),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        width=40,
+        height=40,
+        corner_radius=8,
+        command=play_previous_song
+    )
+    prev_btn.pack(side="left", padx=5)
+    
+    play_btn = ctk.CTkButton(
+        player_frame,
+        text="▶️",
+        font=("Inter", 14),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        width=40,
+        height=40,
+        corner_radius=8,
+        command=toggle_play_pause
+    )
+    play_btn.pack(side="left", padx=5)
+    
+    next_btn = ctk.CTkButton(
+        player_frame,
+        text="⏭️",
+        font=("Inter", 14),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        width=40,
+        height=40,
+        corner_radius=8,
+        command=play_next_song
+    )
+    next_btn.pack(side="left", padx=5)
+    
+    update_sidebar_active_page(active_page)
     return sidebar
 
 def create_header(parent_frame, title, user):
     """Create the header with title and user info"""
-    header_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], height=40)
-    header_frame.pack(fill="x", padx=20, pady=(20, 0))
-
-    # Left side: Page title
-    header_label = ctk.CTkLabel(header_frame, text=title, font=("Arial", 24, "bold"), text_color="white")
-    header_label.pack(side="left")
-
-    # Right side: Username
-    user_label = ctk.CTkLabel(header_frame, 
-                           text=f"Hello, {user['first_name']} {user['last_name']}!", 
-                           font=("Arial", 14), text_color=COLORS["text_secondary"])
-    user_label.pack(side="right")
+    header_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=8)
+    header_frame.pack(fill="x", padx=20, pady=(20, 10))
     
-    return header_frame
+    ctk.CTkLabel(
+        header_frame,
+        text=title,
+        font=("Inter", 24, "bold"),
+        text_color=COLORS["text"]
+    ).pack(side="left")
+    
+    ctk.CTkLabel(
+        header_frame,
+        text=f"Hello, {user['first_name']} {user['last_name']}!",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(side="right")
 
 def create_home_frame(parent_frame, user):
     """Create the home page UI"""
-    # Create header
     create_header(parent_frame, "Home", user)
-
-    # ---------------- Hero Section ----------------
-    hero_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    hero_frame.pack(fill="x", padx=20, pady=(40, 20))
-
-    # Main title
-    title_label = ctk.CTkLabel(hero_frame, text="Discover Music & Play Instantly", 
-                              font=("Arial", 28, "bold"), text_color=COLORS["primary"])
-    title_label.pack(anchor="w")
-
-    # Subtitle
-    subtitle_label = ctk.CTkLabel(hero_frame, 
-                                 text="Explore top trending songs, curated playlists, and personalized recommendations.", 
-                                 font=("Arial", 14), text_color=COLORS["text_secondary"])
-    subtitle_label.pack(anchor="w", pady=(10, 20))
-
-    # Action Buttons with navigation
-    button_frame = ctk.CTkFrame(hero_frame, fg_color=COLORS["content"])
-    button_frame.pack(anchor="w")
-
-    # Trending button (just scrolls to featured songs for now)
-    trending_btn = ctk.CTkButton(button_frame, text="🔥 Trending", font=("Arial", 14, "bold"), 
-                                fg_color=COLORS["secondary"], hover_color=COLORS["secondary_hover"], 
-                                corner_radius=8, height=40, width=150)
-    trending_btn.pack(side="left", padx=(0, 10))
-
-    # Playlists button
-    playlists_btn = ctk.CTkButton(button_frame, text="🎵 Playlists", font=("Arial", 14, "bold"), 
-                                 fg_color=COLORS["success"], hover_color=COLORS["success_hover"], 
-                                 corner_radius=8, height=40, width=150,
-                                 command=lambda: show_playlist_view())
-    playlists_btn.pack(side="left", padx=10)
-
-    # Download button
-    download_btn = ctk.CTkButton(button_frame, text="⬇️ Download", font=("Arial", 14, "bold"), 
-                                fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"], 
-                                corner_radius=8, height=40, width=150,
-                                command=lambda: show_download_view())
-    download_btn.pack(side="left", padx=10)
-
-    # ---------------- Featured Songs Section ----------------
-    featured_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    featured_frame.pack(fill="x", padx=20, pady=20)
-
-    # Section title
-    featured_title = ctk.CTkLabel(featured_frame, text="🔥 Featured Songs", 
-                                 font=("Arial", 18, "bold"), text_color=COLORS["primary"])
-    featured_title.pack(anchor="w", pady=(0, 20))
-
-    # Song cards container
-    songs_frame = ctk.CTkFrame(featured_frame, fg_color=COLORS["content"])
-    songs_frame.pack(fill="x")
-
-    # Get featured songs from database
-    featured_songs = get_featured_songs(3)
     
-    # If database has no songs yet, use sample data
+    hero_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["card"], corner_radius=12)
+    hero_frame.pack(fill="x", padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        hero_frame,
+        text="Discover Music & Play Instantly",
+        font=("Inter", 28, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        hero_frame,
+        text="Explore top trending songs, curated playlists, and personalized recommendations.",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"],
+        wraplength=600
+    ).pack(anchor="w", padx=20, pady=(0, 20))
+    
+    button_frame = ctk.CTkFrame(hero_frame, fg_color="transparent")
+    button_frame.pack(anchor="w", padx=20, pady=(0, 20))
+    
+    ctk.CTkButton(
+        button_frame,
+        text="🔥 Trending",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        corner_radius=8,
+        height=40,
+        width=150,
+        command=show_trending_view
+    ).pack(side="left", padx=(0, 10))
+    
+    ctk.CTkButton(
+        button_frame,
+        text="🎵 Playlists",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["success"],
+        hover_color=COLORS["success_hover"],
+        corner_radius=8,
+        height=40,
+        width=150,
+        command=show_playlist_view
+    ).pack(side="left", padx=10)
+    
+    ctk.CTkButton(
+        button_frame,
+        text="⬇️ Download",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        width=150,
+        command=show_download_view
+    ).pack(side="left", padx=10)
+    
+    featured_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    featured_frame.pack(fill="x", padx=20, pady=10)
+    
+    ctk.CTkLabel(
+        featured_frame,
+        text="🔥 Featured Songs",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    songs_frame = ctk.CTkFrame(featured_frame, fg_color="transparent")
+    songs_frame.pack(fill="x", padx=20)
+    
+    featured_songs = get_featured_songs(3)
     if not featured_songs:
         featured_songs = [
-            {"song_id": 1, "title": "Blinding\nLights", "artist_name": "The\nWeeknd"},
+            {"song_id": 1, "title": "Blinding Lights", "artist_name": "The Weeknd"},
             {"song_id": 2, "title": "Levitating", "artist_name": "Dua Lipa"},
-            {"song_id": 3, "title": "Shape of\nYou", "artist_name": "Ed\nSheeran"}
+            {"song_id": 3, "title": "Shape of You", "artist_name": "Ed Sheeran"}
         ]
     
-    # Create song cards for each featured song
     for song in featured_songs:
         song_card = create_song_card(
-            songs_frame, 
-            song["song_id"], 
-            song["title"], 
+            songs_frame,
+            song["song_id"],
+            song["title"],
             song["artist_name"],
-            play_command=play_song
+            play_command=lambda sid=song["song_id"]: play_song(sid, context='featured', songs_list=featured_songs)
         )
         song_card.pack(side="left", padx=10)
-    
-    return parent_frame
 
 def create_search_frame(parent_frame, user):
-    """Create the search page UI"""
-    # Create header
+    """Create the search page UI with enhanced artist search"""
     create_header(parent_frame, "Search Songs", user)
-
-    # ---------------- Search Bar ----------------
-    search_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    search_frame.pack(fill="x", padx=20, pady=(30, 20))
-
-    # Search type selection
-    search_type_frame = ctk.CTkFrame(search_frame, fg_color=COLORS["content"])
-    search_type_frame.pack(fill="x", pady=(0, 10))
+    
+    search_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["card"], corner_radius=12)
+    search_frame.pack(fill="x", padx=20, pady=(20, 10))
+    
+    search_type_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+    search_type_frame.pack(fill="x", padx=20, pady=(10, 10))
     
     search_type_var = ctk.StringVar(value="all")
     
-    # Search type options
-    search_all_radio = ctk.CTkRadioButton(
-        search_type_frame, 
-        text="All", 
-        variable=search_type_var, 
-        value="all",
-        fg_color=COLORS["primary"],
-        text_color=COLORS["text_secondary"]
-    )
-    search_all_radio.pack(side="left", padx=(0, 20))
+    for text, value in [("All", "all"), ("Songs", "song"), ("Artists", "artist"), ("Albums", "album")]:
+        ctk.CTkRadioButton(
+            search_type_frame,
+            text=text,
+            variable=search_type_var,
+            value=value,
+            font=("Inter", 12),
+            fg_color=COLORS["primary"],
+            text_color=COLORS["text"]
+        ).pack(side="left", padx=(0, 15))
     
-    search_songs_radio = ctk.CTkRadioButton(
-        search_type_frame, 
-        text="Songs", 
-        variable=search_type_var, 
-        value="song",
-        fg_color=COLORS["primary"],
-        text_color=COLORS["text_secondary"]
-    )
-    search_songs_radio.pack(side="left", padx=(0, 20))
+    input_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+    input_frame.pack(fill="x", padx=20, pady=10)
     
-    search_artists_radio = ctk.CTkRadioButton(
-        search_type_frame, 
-        text="Artists", 
-        variable=search_type_var, 
-        value="artist",
-        fg_color=COLORS["primary"],
-        text_color=COLORS["text_secondary"]
+    search_entry = ctk.CTkEntry(
+        input_frame,
+        placeholder_text="Search for songs, artists, or albums...",
+        font=("Inter", 14),
+        text_color=COLORS["text"],
+        fg_color=COLORS["content"],
+        border_color=COLORS["primary"],
+        height=40,
+        corner_radius=8
     )
-    search_artists_radio.pack(side="left", padx=(0, 20))
-    
-    search_albums_radio = ctk.CTkRadioButton(
-        search_type_frame, 
-        text="Albums", 
-        variable=search_type_var, 
-        value="album",
-        fg_color=COLORS["primary"],
-        text_color=COLORS["text_secondary"]
-    )
-    search_albums_radio.pack(side="left")
-
-    # Search entry with rounded corners
-    search_entry = ctk.CTkEntry(search_frame, 
-                              placeholder_text="Search for songs, artists, or albums...",
-                              font=("Arial", 14), text_color="#FFFFFF",
-                              fg_color=COLORS["card"], border_color="#2A2A4E", 
-                              height=45, corner_radius=10)
     search_entry.pack(side="left", fill="x", expand=True)
     
-    # Define the search function
     def perform_search():
-        # Clear previous search results
         for widget in songs_section.winfo_children():
-            if widget != songs_title:  # Keep the section title
+            if widget != songs_title:
                 widget.destroy()
         
-        # Get search query
         query = search_entry.get()
-        
         if not query:
-            # If no query, just show recent songs
             recent_songs = get_featured_songs(6)
             display_search_results(recent_songs, "Recent Songs")
             return
         
-        # Perform the search
         search_results = search_songs(query, search_type_var.get())
-        
-        # Display results
         if search_results:
             display_search_results(search_results, f"Search Results for '{query}'")
         else:
-            no_results_label = ctk.CTkLabel(
-                songs_section, 
-                text=f"No songs found for '{query}'", 
-                font=("Arial", 14),
+            ctk.CTkLabel(
+                songs_section,
+                text=f"No songs found for '{query}'",
+                font=("Inter", 14),
                 text_color=COLORS["text_secondary"]
-            )
-            no_results_label.pack(pady=20)
+            ).pack(pady=20)
     
-    # Bind Enter key to search
     search_entry.bind("<Return>", lambda e: perform_search())
     
-    # Search button
-    search_button = ctk.CTkButton(
-        search_frame, 
-        text="Search", 
-        font=("Arial", 14, "bold"),
-        fg_color=COLORS["primary"], 
-        hover_color=COLORS["primary_hover"], 
-        corner_radius=10,
-        command=perform_search,
-        height=45,
-        width=100
-    )
-    search_button.pack(side="right", padx=(10, 0))
-
-    # ---------------- Songs Section ----------------
-    global songs_section, songs_title
-    songs_section = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    songs_section.pack(fill="both", expand=True, padx=20, pady=10)
-
-    # Section title
-    songs_title = ctk.CTkLabel(songs_section, text="Recent Songs 🎵", 
-                             font=("Arial", 20, "bold"), text_color=COLORS["primary"])
-    songs_title.pack(anchor="w", pady=(0, 15))
+    ctk.CTkButton(
+        input_frame,
+        text="Search",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        width=100,
+        command=perform_search
+    ).pack(side="right", padx=(10, 0))
     
-    # Function to display search results
+    global songs_section, songs_title
+    songs_section = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    songs_section.pack(fill="both", expand=True, padx=20, pady=10)
+    
+    songs_title = ctk.CTkLabel(
+        songs_section,
+        text="Recent Songs 🎵",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    )
+    songs_title.pack(anchor="w", padx=20, pady=(20, 10))
+    
     def display_search_results(songs, section_subtitle=None):
-        """Display songs in the search results section"""
-        # Update section subtitle if provided
         if section_subtitle:
             songs_title.configure(text=f"🔍 {section_subtitle}")
         
         if not songs:
-            no_songs_label = ctk.CTkLabel(
-                songs_section, 
-                text="No songs available", 
-                font=("Arial", 14),
+            ctk.CTkLabel(
+                songs_section,
+                text="No songs available",
+                font=("Inter", 14),
                 text_color=COLORS["text_secondary"]
-            )
-            no_songs_label.pack(pady=20)
+            ).pack(pady=20)
             return
         
-        # Create song rows
         for song in songs:
-            # Create a frame for each song row
-            song_frame = ctk.CTkFrame(songs_section, fg_color=COLORS["card"], corner_radius=10, height=50)
+            song_frame = ctk.CTkFrame(songs_section, fg_color=COLORS["card"], corner_radius=8, height=50)
             song_frame.pack(fill="x", pady=5)
             
-            # Format the song display text
+            display_text = f"🎵 {song['artist_name']} - {song['title']}"
             if "album_name" in song and song["album_name"]:
-                display_text = f"🎵 {song['artist_name']} - {song['title']} ({song['album_name']})"
-            else:
-                display_text = f"🎵 {song['artist_name']} - {song['title']}"
-            
-            # Add duration if available
+                display_text += f" ({song['album_name']})"
             if "duration_formatted" in song:
                 display_text += f" ({song['duration_formatted']})"
             
-            # Song name and info
             song_label = ctk.CTkLabel(
-                song_frame, 
-                text=display_text, 
-                font=("Arial", 14), 
-                text_color="white",
+                song_frame,
+                text=display_text,
+                font=("Inter", 14),
+                text_color=COLORS["text"],
                 anchor="w"
             )
             song_label.pack(side="left", padx=15, fill="y")
             
-            # Play button
-            play_icon = ctk.CTkLabel(
-                song_frame, 
-                text="▶️", 
-                font=("Arial", 16), 
-                text_color=COLORS["success"]
-            )
-            play_icon.pack(side="right", padx=15)
+            ctk.CTkButton(
+                song_frame,
+                text="▶️",
+                font=("Inter", 12),
+                fg_color=COLORS["success"],
+                hover_color=COLORS["success_hover"],
+                width=40,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: play_song(sid, context='search', songs_list=songs)
+            ).pack(side="right", padx=5)
             
-            # Add play song command
-            song_id = song["song_id"]
+            ctk.CTkButton(
+                song_frame,
+                text="➕ Playlist",
+                font=("Inter", 12),
+                fg_color=COLORS["secondary"],
+                hover_color=COLORS["secondary_hover"],
+                width=100,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: add_song_to_playlist_dialog(sid)
+            ).pack(side="right", padx=5)
             
-            # Make the whole row clickable
-            song_frame.bind("<Button-1>", lambda e, sid=song_id: play_song(sid))
-            song_label.bind("<Button-1>", lambda e, sid=song_id: play_song(sid))
-            play_icon.bind("<Button-1>", lambda e, sid=song_id: play_song(sid))
-    
-    # Show recent songs on initial load
+            song_label.bind("<Button-1>", lambda e, sid=song["song_id"]: play_song(sid, context='search', songs_list=songs))
+
     recent_songs = get_featured_songs(6)
     display_search_results(recent_songs, "Recent Songs")
+
+def create_trending_frame(parent_frame, user):
+    """Create the trending songs page UI"""
+    create_header(parent_frame, "Trending Songs", user)
     
-    return parent_frame
+    songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    songs_frame.pack(fill="both", expand=True, padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        songs_frame,
+        text="Trending Songs 🔥",
+        font=("Inter", 24, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(20, 10))
+    
+    ctk.CTkLabel(
+        songs_frame,
+        text="Discover the most popular songs right now.",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(pady=(0, 20))
+    
+    trending_songs = get_popular_songs(10)
+    
+    if not trending_songs:
+        ctk.CTkLabel(
+            songs_frame,
+            text="No trending songs available",
+            font=("Inter", 14),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=30)
+    else:
+        for song in trending_songs:
+            song_frame = ctk.CTkFrame(songs_frame, fg_color=COLORS["card"], corner_radius=8, height=50)
+            song_frame.pack(fill="x", pady=5, ipady=5)
+            song_frame.pack_propagate(False)
+            
+            display_text = f"🎵 {song['artist_name']} - {song['title']}"
+            if song.get('genre_name'):
+                display_text += f" ({song['genre_name']})"
+            if 'file_size_formatted' in song and 'file_type' in song:
+                display_text += f" ({song['file_size_formatted']} - {song['file_type']})"
+            
+            ctk.CTkLabel(
+                song_frame,
+                text=display_text,
+                font=("Inter", 14),
+                text_color=COLORS["text"],
+                anchor="w"
+            ).pack(side="left", padx=20)
+            
+            ctk.CTkButton(
+                song_frame,
+                text="▶️ Play",
+                font=("Inter", 12),
+                fg_color=COLORS["success"],
+                hover_color=COLORS["success_hover"],
+                width=80,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: play_song(sid, context='trending', songs_list=trending_songs)
+            ).pack(side="right", padx=5)
+            
+            ctk.CTkButton(
+                song_frame,
+                text="➕ Playlist",
+                font=("Inter", 12),
+                fg_color=COLORS["secondary"],
+                hover_color=COLORS["secondary_hover"],
+                width=100,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: add_song_to_playlist_dialog(sid)
+            ).pack(side="right", padx=5)
+            
+            song_frame.bind("<Button-1>", lambda e, sid=song["song_id"]: play_song(sid, context='trending', songs_list=trending_songs))
+
+def add_song_to_playlist_dialog(song_id):
+    """Open a dialog to select a playlist to add the song to"""
+    dialog = ctk.CTkToplevel()
+    dialog.title("Add to Playlist")
+    dialog.geometry("350x450")
+    dialog.configure(fg_color=COLORS["content"])
+    
+    ctk.CTkLabel(
+        dialog,
+        text="Select Playlist",
+        font=("Inter", 16, "bold"),
+        text_color=COLORS["text"]
+    ).pack(pady=20)
+    
+    playlists = get_user_playlists()
+    playlist_var = ctk.StringVar()
+    
+    if playlists:
+        ctk.CTkOptionMenu(
+            dialog,
+            variable=playlist_var,
+            values=[p["name"] for p in playlists],
+            font=("Inter", 14),
+            fg_color=COLORS["primary"],
+            button_color=COLORS["primary_hover"],
+            button_hover_color=COLORS["primary"],
+            text_color=COLORS["text"],
+            width=250,
+            height=40
+        ).pack(pady=10)
+    else:
+        ctk.CTkLabel(
+            dialog,
+            text="No playlists available",
+            font=("Inter", 14),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=20)
+    
+    def add_to_selected_playlist():
+        if not playlists:
+            messagebox.showwarning("Warning", "No playlists available. Please create a playlist first.")
+            return
+        
+        playlist_name = playlist_var.get()
+        if not playlist_name:
+            messagebox.showwarning("Warning", "Please select a playlist.")
+            return
+        
+        playlist_id = next(p["playlist_id"] for p in playlists if p["name"] == playlist_name)
+        
+        if add_song_to_playlist(playlist_id, song_id):
+            messagebox.showinfo("Success", "Song added to playlist!")
+            dialog.destroy()
+        else:
+            messagebox.showerror("Error", "Failed to add song to playlist.")
+    
+    ctk.CTkButton(
+        dialog,
+        text="Add to Playlist",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        command=add_to_selected_playlist
+    ).pack(pady=20)
+    
+    ctk.CTkLabel(
+        dialog,
+        text="Or create a new playlist:",
+        font=("Inter", 14),
+        text_color=COLORS["text"]
+    ).pack(pady=(20, 10))
+    
+    new_playlist_entry = ctk.CTkEntry(
+        dialog,
+        placeholder_text="New playlist name",
+        font=("Inter", 14),
+        text_color=COLORS["text"],
+        fg_color=COLORS["card"],
+        border_color=COLORS["primary"],
+        height=40,
+        width=250
+    )
+    new_playlist_entry.pack(pady=10)
+    
+    def create_and_add_to_playlist():
+        playlist_name = new_playlist_entry.get().strip()
+        if not playlist_name:
+            messagebox.showwarning("Warning", "Please enter a playlist name.")
+            return
+        
+        if create_playlist(playlist_name):
+            new_playlists = get_user_playlists()
+            new_playlist_id = next(p["playlist_id"] for p in new_playlists if p["name"] == playlist_name)
+            if add_song_to_playlist(new_playlist_id, song_id):
+                messagebox.showinfo("Success", f"Created playlist '{playlist_name}' and added song!")
+                dialog.destroy()
+            else:
+                messagebox.showerror("Error", "Failed to add song to new playlist.")
+        else:
+            messagebox.showerror("Error", "Failed to create playlist.")
+    
+    ctk.CTkButton(
+        dialog,
+        text="Create & Add",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        corner_radius=8,
+        height=40,
+        command=create_and_add_to_playlist
+    ).pack(pady=10)
 
 def create_download_frame(parent_frame, user):
     """Create the download page UI"""
-    # Create header
     create_header(parent_frame, "Download Songs", user)
-
-    # ---------------- Download Your Favorite Songs ----------------
-    favorite_songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    favorite_songs_frame.pack(fill="both", expand=True, padx=20, pady=(40, 0))
-
-    # Section title - centered
-    title_label = ctk.CTkLabel(favorite_songs_frame, text="Download Your Favorite Songs 🎵", 
-                              font=("Arial", 24, "bold"), text_color=COLORS["primary"])
-    title_label.pack(pady=(0, 5))
-
-    # Subtitle - centered
-    subtitle_label = ctk.CTkLabel(favorite_songs_frame, text="Select a song to download or upload your own.", 
-                                 font=("Arial", 14), text_color=COLORS["text_secondary"])
-    subtitle_label.pack(pady=(0, 20))
-
-    # Tabview for different song sections
-    tabs = ctk.CTkTabview(favorite_songs_frame, fg_color=COLORS["content"])
+    
+    favorite_songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    favorite_songs_frame.pack(fill="both", expand=True, padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        favorite_songs_frame,
+        text="Download Your Favorite Songs 🎵",
+        font=("Inter", 24, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(20, 10))
+    
+    ctk.CTkLabel(
+        favorite_songs_frame,
+        text="Select a song to download or upload your own.",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(pady=(0, 20))
+    
+    tabs = ctk.CTkTabview(favorite_songs_frame, fg_color=COLORS["card"], corner_radius=8)
     tabs.pack(fill="both", expand=True)
     
-    # Add tabs
     favorite_tab = tabs.add("Your Favorites")
     popular_tab = tabs.add("Popular Songs")
     
-    # Function to select a song for download
     global selected_song, song_frames
     selected_song = {"id": None, "title": None, "artist": None}
     song_frames = []
     
     def select_song_for_download(song_id, title, artist, song_frame):
-        """Select a song for download"""
         global selected_song, song_frames
-        
-        # Reset highlight on all frames
         for frame in song_frames:
             frame.configure(fg_color=COLORS["card"])
-        
-        # Highlight selected frame
-        song_frame.configure(fg_color="#2A2A4E")
-        
-        # Update selected song info
+        song_frame.configure(fg_color=COLORS["primary"])
         selected_song["id"] = song_id
         selected_song["title"] = title
         selected_song["artist"] = artist
     
-    # Function to display songs in tabs
     def display_songs_in_tab(tab, songs):
-        """Display songs in a tab"""
         if not songs:
-            no_songs_label = ctk.CTkLabel(
-                tab, 
-                text="No songs available", 
-                font=("Arial", 14), 
+            ctk.CTkLabel(
+                tab,
+                text="No songs available",
+                font=("Inter", 14),
                 text_color=COLORS["text_secondary"]
-            )
-            no_songs_label.pack(pady=30)
+            ).pack(pady=30)
             return
         
-        # Create song frames for each song
         for song in songs:
-            song_frame = ctk.CTkFrame(tab, fg_color=COLORS["card"], corner_radius=10, height=50)
+            song_frame = ctk.CTkFrame(tab, fg_color=COLORS["card"], corner_radius=8, height=50)
             song_frame.pack(fill="x", pady=5, ipady=5)
-            
-            # Prevent frame from resizing
             song_frame.pack_propagate(False)
             
-            # Song icon and title - left side
-            song_icon = "🎵"
-            song_label = ctk.CTkLabel(
-                song_frame, 
-                text=f"{song_icon} {song['artist_name']} - {song['title']}", 
-                font=("Arial", 14), 
-                text_color="white",
+            ctk.CTkLabel(
+                song_frame,
+                text=f"🎵 {song['artist_name']} - {song['title']}",
+                font=("Inter", 14),
+                text_color=COLORS["text"],
                 anchor="w"
-            )
-            song_label.pack(side="left", padx=20)
+            ).pack(side="left", padx=20)
             
-            # File size and type - right side
             if 'file_size_formatted' in song and 'file_type' in song:
-                file_info = ctk.CTkLabel(
-                    song_frame, 
-                    text=f"{song['file_size_formatted']} ({song['file_type']})", 
-                    font=("Arial", 12), 
+                ctk.CTkLabel(
+                    song_frame,
+                    text=f"{song['file_size_formatted']} ({song['file_type']})",
+                    font=("Inter", 12),
                     text_color=COLORS["text_secondary"]
-                )
-                file_info.pack(side="right", padx=(0, 20))
+                ).pack(side="right", padx=(0, 20))
             
-            # Play button - right side
-            play_btn = ctk.CTkButton(
-                song_frame, 
-                text="▶️", 
-                font=("Arial", 14), 
-                fg_color="#1E293B",
-                hover_color="#2A3749",
-                width=30, height=30,
-                command=lambda sid=song['song_id']: play_song(sid)
-            )
-            play_btn.pack(side="right", padx=5)
+            ctk.CTkButton(
+                song_frame,
+                text="▶️",
+                font=("Inter", 12),
+                fg_color=COLORS["success"],
+                hover_color=COLORS["success_hover"],
+                width=40,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song['song_id']: play_song(sid, context='download', songs_list=songs)
+            ).pack(side="right", padx=5)
             
-            # Make frame selectable
+            ctk.CTkButton(
+                song_frame,
+                text="➕ Playlist",
+                font=("Inter", 12),
+                fg_color=COLORS["secondary"],
+                hover_color=COLORS["secondary_hover"],
+                width=100,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song['song_id']: add_song_to_playlist_dialog(sid)
+            ).pack(side="right", padx=5)
+            
             song_frame.bind(
-                "<Button-1>", 
-                lambda e, sid=song['song_id'], title=song['title'], artist=song['artist_name'], frame=song_frame: 
+                "<Button-1>",
+                lambda e, sid=song['song_id'], title=song['title'], artist=song['artist_name'], frame=song_frame:
                     select_song_for_download(sid, title, artist, frame)
             )
-            song_label.bind(
-                "<Button-1>", 
-                lambda e, sid=song['song_id'], title=song['title'], artist=song['artist_name'], frame=song_frame: 
-                    select_song_for_download(sid, title, artist, frame)
-            )
-            
-            # Add to list of song frames
             song_frames.append(song_frame)
     
-    # Display favorite songs tab
     favorite_songs = get_user_favorite_songs()
     display_songs_in_tab(favorite_tab, favorite_songs)
     
-    # Display popular songs tab
     popular_songs = get_popular_songs()
     display_songs_in_tab(popular_tab, popular_songs)
     
-    # Button frame at the bottom
-    button_frame = ctk.CTkFrame(favorite_songs_frame, fg_color=COLORS["content"])
-    button_frame.pack(pady=25)
+    button_frame = ctk.CTkFrame(favorite_songs_frame, fg_color="transparent")
+    button_frame.pack(pady=20)
     
-    # Function to download selected song
     def download_selected_song():
-        """Download the selected song"""
         if not selected_song["id"]:
             messagebox.showwarning("Warning", "Please select a song to download")
             return
-        
-        # Download the song
         download_song(selected_song["id"])
     
-    # Function to handle file upload (placeholder)
     def handle_upload_song():
-        """Handle song upload (placeholder)"""
         messagebox.showinfo("Upload Song", "This functionality will be implemented in a future update.")
     
-    # Download button
-    download_button = ctk.CTkButton(button_frame, text="⬇️ Download Selected", font=("Arial", 14, "bold"), 
-                                   fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"], 
-                                   corner_radius=5, height=40, width=210, 
-                                   command=download_selected_song)
-    download_button.pack(side="left", padx=10)
-
-    # Upload button
-    upload_button = ctk.CTkButton(button_frame, text="⬆️ Upload New Song", font=("Arial", 14, "bold"), 
-                                 fg_color=COLORS["secondary"], hover_color=COLORS["secondary_hover"], 
-                                 corner_radius=5, height=40, width=210,
-                                 command=handle_upload_song)
-    upload_button.pack(side="left", padx=10)
+    ctk.CTkButton(
+        button_frame,
+        text="⬇️ Download Selected",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        width=210,
+        command=download_selected_song
+    ).pack(side="left", padx=10)
     
-    return parent_frame
+    ctk.CTkButton(
+        button_frame,
+        text="⬆️ Upload New Song",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        corner_radius=8,
+        height=40,
+        width=210,
+        command=handle_upload_song
+    ).pack(side="left", padx=10)
+
 def create_recommend_frame(parent_frame, user):
     """Create the recommendations page UI"""
-    # Create header
     create_header(parent_frame, "Recommended Songs", user)
-
-    # ---------------- Songs You Might Like ----------------
-    songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    songs_frame.pack(fill="both", expand=True, padx=20, pady=(40, 0))
-
-    # Section title - centered
-    title_label = ctk.CTkLabel(songs_frame, text="Songs You Might Like 🎵", 
-                              font=("Arial", 24, "bold"), text_color=COLORS["primary"])
-    title_label.pack(pady=(0, 5))
-
-    # Subtitle with personalized text based on listening history
-    subtitle_text = "Discover music based on your listening history." 
-    listening_history = get_user_favorite_songs(limit=1)
-    if not listening_history:
-        subtitle_text = "Start listening to songs to get personalized recommendations."
-        
-    subtitle_label = ctk.CTkLabel(songs_frame, text=subtitle_text, 
-                                 font=("Arial", 14), text_color=COLORS["text_secondary"])
-    subtitle_label.pack(pady=(0, 20))
     
-    # Song list container
-    recommended_songs_frame = ctk.CTkFrame(songs_frame, fg_color=COLORS["content"])
+    songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    songs_frame.pack(fill="both", expand=True, padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        songs_frame,
+        text="Songs You Might Like 🎵",
+        font=("Inter", 24, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(20, 10))
+    
+    subtitle_text = "Discover music based on your listening history."
+    if not get_user_favorite_songs(limit=1):
+        subtitle_text = "Start listening to songs to get personalized recommendations."
+    
+    ctk.CTkLabel(
+        songs_frame,
+        text=subtitle_text,
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(pady=(0, 20))
+    
+    recommended_songs_frame = ctk.CTkFrame(songs_frame, fg_color="transparent")
     recommended_songs_frame.pack(fill="both", expand=True)
     
-    # Get recommended songs
     recommended_songs = get_recommended_songs(8)
     
     if not recommended_songs:
-        no_songs_label = ctk.CTkLabel(
-            recommended_songs_frame, 
-            text="No recommended songs available", 
-            font=("Arial", 14),
+        ctk.CTkLabel(
+            recommended_songs_frame,
+            text="No recommended songs available",
+            font=("Inter", 14),
             text_color=COLORS["text_secondary"]
-        )
-        no_songs_label.pack(pady=30)
+        ).pack(pady=30)
     else:
-        # Display songs
         for song in recommended_songs:
-            # Create song row
-            song_frame = ctk.CTkFrame(recommended_songs_frame, fg_color=COLORS["card"], corner_radius=10, height=50)
+            song_frame = ctk.CTkFrame(recommended_songs_frame, fg_color=COLORS["card"], corner_radius=8, height=50)
             song_frame.pack(fill="x", pady=5, ipady=5)
-            
-            # Make sure the frame stays at desired height
             song_frame.pack_propagate(False)
             
-            # Get display text with icon
-            song_icon = "🎵"
-            display_text = f"{song_icon} {song['artist_name']} - {song['title']}"
+            display_text = f"🎵 {song['artist_name']} - {song['title']}"
             if song.get('genre_name'):
                 display_text += f" ({song['genre_name']})"
             
-            # Song label with icon
-            song_label = ctk.CTkLabel(song_frame, text=display_text, font=("Arial", 14), text_color="white")
-            song_label.pack(side="left", padx=20)
+            ctk.CTkLabel(
+                song_frame,
+                text=display_text,
+                font=("Inter", 14),
+                text_color=COLORS["text"],
+                anchor="w"
+            ).pack(side="left", padx=20)
             
-            # Play button
-            play_btn = ctk.CTkButton(song_frame, text="▶️ Play", font=("Arial", 12), 
-                                   fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"], 
-                                   width=80, height=30,
-                                   command=lambda sid=song["song_id"]: play_song(sid))
-            play_btn.pack(side="right", padx=20)
+            ctk.CTkButton(
+                song_frame,
+                text="▶️ Play",
+                font=("Inter", 12),
+                fg_color=COLORS["primary"],
+                hover_color=COLORS["primary_hover"],
+                width=80,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: play_song(sid, context='recommend', songs_list=recommended_songs)
+            ).pack(side="right", padx=5)
             
-            # Make frame clickable
-            song_frame.bind("<Button-1>", lambda e, sid=song["song_id"]: play_song(sid))
-            song_label.bind("<Button-1>", lambda e, sid=song["song_id"]: play_song(sid))
+            ctk.CTkButton(
+                song_frame,
+                text="➕ Playlist",
+                font=("Inter", 12),
+                fg_color=COLORS["secondary"],
+                hover_color=COLORS["secondary_hover"],
+                width=100,
+                height=40,
+                corner_radius=8,
+                command=lambda sid=song["song_id"]: add_song_to_playlist_dialog(sid)
+            ).pack(side="right", padx=5)
+            
+            song_frame.bind("<Button-1>", lambda e, sid=song["song_id"]: play_song(sid, context='recommend', songs_list=recommended_songs))
     
-    # Refresh button at the bottom
-    button_frame = ctk.CTkFrame(songs_frame, fg_color=COLORS["content"])
-    button_frame.pack(pady=25)
+    button_frame = ctk.CTkFrame(songs_frame, fg_color="transparent")
+    button_frame.pack(pady=20)
     
     def refresh_recommendations():
-        """Refresh the recommendations"""
-        # Clear the content frame and recreate it
         clear_content_frame()
-        create_recommend_frame(content_frame, user_info)
+        create_recommend_frame(content_frame, user)
         messagebox.showinfo("Refreshed", "Recommendations have been updated!")
     
-    refresh_button = ctk.CTkButton(button_frame, text="⟳ Refresh", font=("Arial", 14, "bold"), 
-                                  fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"], 
-                                  corner_radius=5, height=40, width=140,
-                                  command=refresh_recommendations)
-    refresh_button.pack()
-    
-    return parent_frame
+    ctk.CTkButton(
+        button_frame,
+        text="⟳ Refresh",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        width=140,
+        command=refresh_recommendations
+    ).pack()
 
 def create_playlist_frame(parent_frame, user):
-    """Create the playlist page UI (placeholder)"""
-    # Create header
+    """Create the playlist page UI with creation and management features"""
     create_header(parent_frame, "Playlists", user)
     
-    # Placeholder content
-    placeholder_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    placeholder_frame.pack(fill="both", expand=True, padx=20, pady=(40, 20))
+    main_content_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    main_content_frame.pack(fill="both", expand=True, padx=20, pady=(20, 10))
     
-    # Title
-    title_label = ctk.CTkLabel(placeholder_frame, text="Playlist Feature Coming Soon", 
-                              font=("Arial", 24, "bold"), text_color=COLORS["primary"])
-    title_label.pack(pady=(40, 10))
+    ctk.CTkLabel(
+        main_content_frame,
+        text="Your Playlists 🎵",
+        font=("Inter", 24, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(20, 10))
     
-    # Message
-    message_label = ctk.CTkLabel(placeholder_frame, 
-                               text="We're working on implementing playlist functionality. Stay tuned!", 
-                               font=("Arial", 16),
-                               text_color=COLORS["text_secondary"])
-    message_label.pack(pady=10)
+    create_frame = ctk.CTkFrame(main_content_frame, fg_color=COLORS["card"], corner_radius=8)
+    create_frame.pack(fill="x", pady=10)
     
-    # Icon
-    icon_label = ctk.CTkLabel(placeholder_frame, text="🎵 + 📋 = ❤️", font=("Arial", 40))
-    icon_label.pack(pady=30)
+    playlist_name_entry = ctk.CTkEntry(
+        create_frame,
+        placeholder_text="Enter playlist name",
+        font=("Inter", 14),
+        text_color=COLORS["text"],
+        fg_color=COLORS["content"],
+        border_color=COLORS["primary"],
+        height=40,
+        width=300
+    )
+    playlist_name_entry.pack(side="left", padx=10)
     
-    # Button to return to home
-    home_button = ctk.CTkButton(placeholder_frame, text="Return to Home", 
-                              font=("Arial", 14, "bold"),
-                              fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"],
-                              corner_radius=5, height=40, width=160,
-                              command=lambda: show_home_view())
-    home_button.pack(pady=20)
+    def create_new_playlist():
+        playlist_name = playlist_name_entry.get().strip()
+        if not playlist_name:
+            messagebox.showwarning("Warning", "Please enter a playlist name.")
+            return
+        
+        if create_playlist(playlist_name):
+            messagebox.showinfo("Success", f"Playlist '{playlist_name}' created!")
+            clear_content_frame()
+            create_playlist_frame(parent_frame, user)
+        else:
+            messagebox.showerror("Error", "Failed to create playlist.")
     
-    return parent_frame
+    ctk.CTkButton(
+        create_frame,
+        text="Create Playlist",
+        font=("Inter", 14, "bold"),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        corner_radius=8,
+        height=40,
+        command=create_new_playlist
+    ).pack(side="left", padx=10)
+    
+    playlists_frame = ctk.CTkFrame(main_content_frame, fg_color="transparent")
+    playlists_frame.pack(fill="both", expand=True)
+    
+    playlists = get_user_playlists()
+    
+    if not playlists:
+        ctk.CTkLabel(
+            playlists_frame,
+            text="No playlists created yet. Create one above!",
+            font=("Inter", 16),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=20)
+    else:
+        for playlist in playlists:
+            playlist_frame = ctk.CTkFrame(playlists_frame, fg_color=COLORS["card"], corner_radius=8)
+            playlist_frame.pack(fill="x", pady=5)
+            
+            ctk.CTkLabel(
+                playlist_frame,
+                text=f"📋 {playlist['name']}",
+                font=("Inter", 16, "bold"),
+                text_color=COLORS["text"]
+            ).pack(side="left", padx=10)
+            
+            ctk.CTkButton(
+                playlist_frame,
+                text="View Songs",
+                font=("Inter", 12),
+                fg_color=COLORS["primary"],
+                hover_color=COLORS["primary_hover"],
+                width=100,
+                height=40,
+                corner_radius=8,
+                command=lambda pid=playlist["playlist_id"]: show_playlist_songs(pid)
+            ).pack(side="right", padx=5)
+            
+            ctk.CTkButton(
+                playlist_frame,
+                text="🗑️",
+                font=("Inter", 12),
+                fg_color=COLORS["danger"],
+                hover_color=COLORS["danger_hover"],
+                width=40,
+                height=40,
+                corner_radius=8,
+                command=lambda pid=playlist["playlist_id"]: delete_playlist_and_refresh(pid)
+            ).pack(side="right", padx=5)
+    
+    def show_playlist_songs(playlist_id):
+        clear_content_frame()
+        create_header(parent_frame, "Playlist Songs", user)
+        
+        songs_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+        songs_frame.pack(fill="both", expand=True, padx=20, pady=(20, 10))
+        
+        playlist = next(p for p in playlists if p["playlist_id"] == playlist_id)
+        ctk.CTkLabel(
+            songs_frame,
+            text=f"Songs in {playlist['name']} 🎵",
+            font=("Inter", 24, "bold"),
+            text_color=COLORS["primary"]
+        ).pack(pady=(20, 10))
+        
+        songs = get_playlist_songs(playlist_id)
+        
+        if not songs:
+            ctk.CTkLabel(
+                songs_frame,
+                text="No songs in this playlist. Add some from the Search page!",
+                font=("Inter", 16),
+                text_color=COLORS["text_secondary"]
+            ).pack(pady=20)
+        else:
+            for song in songs:
+                song_frame = ctk.CTkFrame(songs_frame, fg_color=COLORS["card"], corner_radius=8, height=50)
+                song_frame.pack(fill="x", pady=5)
+                
+                ctk.CTkLabel(
+                    song_frame,
+                    text=f"🎵 {song['artist_name']} - {song['title']}",
+                    font=("Inter", 14),
+                    text_color=COLORS["text"]
+                ).pack(side="left", padx=10)
+                
+                ctk.CTkButton(
+                    song_frame,
+                    text="▶️",
+                    font=("Inter", 12),
+                    fg_color=COLORS["success"],
+                    hover_color=COLORS["success_hover"],
+                    width=40,
+                    height=40,
+                    corner_radius=8,
+                    command=lambda sid=song["song_id"]: play_song(sid, context=f'playlist_{playlist_id}', songs_list=songs)
+                ).pack(side="right", padx=5)
+                
+                ctk.CTkButton(
+                    song_frame,
+                    text="🗑️",
+                    font=("Inter", 12),
+                    fg_color=COLORS["danger"],
+                    hover_color=COLORS["danger_hover"],
+                    width=40,
+                    height=40,
+                    corner_radius=8,
+                    command=lambda sid=song["song_id"]: remove_song_and_refresh(playlist_id, sid)
+                ).pack(side="right", padx=5)
+        
+        ctk.CTkButton(
+            songs_frame,
+            text="Back to Playlists",
+            font=("Inter", 14, "bold"),
+            fg_color=COLORS["primary"],
+            hover_color=COLORS["primary_hover"],
+            corner_radius=8,
+            height=40,
+            command=show_playlist_view
+        ).pack(pady=20)
+    
+    def delete_playlist_and_refresh(playlist_id):
+        if delete_playlist(playlist_id):
+            messagebox.showinfo("Success", "Playlist deleted!")
+            clear_content_frame()
+            create_playlist_frame(parent_frame, user)
+        else:
+            messagebox.showerror("Error", "Failed to delete playlist.")
+    
+    def remove_song_and_refresh(playlist_id, song_id):
+        if remove_song_from_playlist(playlist_id, song_id):
+            messagebox.showinfo("Success", "Song removed from playlist!")
+            clear_content_frame()
+            show_playlist_songs(playlist_id)
+        else:
+            messagebox.showerror("Error", "Failed to remove song.")
 
 # ------------------- Navigation Functions -------------------
 def open_login_page():
     """Logout and open the login page"""
     try:
-        # Stop any playing music
         if mixer.music.get_busy():
             mixer.music.stop()
             
-        # Remove current user file
         if os.path.exists("current_user.txt"):
             os.remove("current_user.txt")
             
@@ -1389,72 +1923,76 @@ def clear_content_frame():
 def show_home_view():
     """Show the home view"""
     clear_content_frame()
-    create_sidebar(main_frame, user_info, "home")
+    update_sidebar_active_page("home")
     create_home_frame(content_frame, user_info)
 
 def show_search_view():
     """Show the search view"""
     clear_content_frame()
-    create_sidebar(main_frame, user_info, "search")
+    update_sidebar_active_page("search")
     create_search_frame(content_frame, user_info)
 
 def show_playlist_view():
     """Show the playlist view"""
     clear_content_frame()
-    create_sidebar(main_frame, user_info, "playlist")
+    update_sidebar_active_page("playlist")
     create_playlist_frame(content_frame, user_info)
 
 def show_download_view():
     """Show the download view"""
     clear_content_frame()
-    create_sidebar(main_frame, user_info, "download")
+    update_sidebar_active_page("download")
     create_download_frame(content_frame, user_info)
 
 def show_recommend_view():
     """Show the recommendations view"""
     clear_content_frame()
-    create_sidebar(main_frame, user_info, "recommend")
+    update_sidebar_active_page("recommend")
     create_recommend_frame(content_frame, user_info)
+
+def show_trending_view():
+    """Show the trending songs view"""
+    clear_content_frame()
+    update_sidebar_active_page("trending")
+    create_trending_frame(content_frame, user_info)
 
 # ------------------- Initialize App -------------------
 if __name__ == "__main__":
     try:
-        # Get current user info
         user_info = get_current_user()
         if not user_info:
-            # Redirect to login if not logged in
             open_login_page()
             exit()
 
-        # Ensure all directories exist
         ensure_directories_exist()
-
-        # ---------------- Initialize App ----------------
-        ctk.set_appearance_mode(UI_CONFIG["theme"])  # Dark mode
-        ctk.set_default_color_theme(UI_CONFIG["color_theme"])  # Default theme
+        
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
 
         root = ctk.CTk()
         root.title(f"{APP_CONFIG['name']} - User Interface")
-        root.geometry(UI_CONFIG["default_window_size"])
-        root.resizable(True, True)
-
-        # ---------------- Main Frame ----------------
-        main_frame = ctk.CTkFrame(root, fg_color=COLORS["background"], corner_radius=15)
+        root.geometry("1200x700")
+        
+        root.update_idletasks()
+        width = root.winfo_width()
+        height = root.winfo_height()
+        x = (root.winfo_screenwidth() // 2) - (width // 2)
+        y = (root.winfo_screenheight() // 2) - (height // 2)
+        root.geometry(f"{width}x{height}+{x}+{y}")
+        
+        main_frame = ctk.CTkFrame(root, fg_color=COLORS["background"], corner_radius=12)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # ---------------- Create Sidebar ----------------
-        view_to_show = "home"  # Default view
+        
+        view_to_show = "home"
         if len(sys.argv) > 1:
             view_to_show = sys.argv[1].lower()
             
-        # Create sidebar with active page highlighted
         create_sidebar(main_frame, user_info, view_to_show)
-
-        # ---------------- Main Content ----------------
-        content_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["content"], corner_radius=10)
+        
+        global content_frame
+        content_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["background"], corner_radius=12)
         content_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
-
-        # Show the appropriate view based on command line argument
+        
         if view_to_show == "search":
             create_search_frame(content_frame, user_info)
         elif view_to_show == "playlist":
@@ -1465,13 +2003,10 @@ if __name__ == "__main__":
             create_recommend_frame(content_frame, user_info)
         else:
             create_home_frame(content_frame, user_info)
-
-        # ---------------- Run Application ----------------
+        
         root.mainloop()
         
     except Exception as e:
-        import traceback
-        print(f"Error in users_view.py: {e}")
-        traceback.print_exc()
-        messagebox.showerror("Error", f"An error occurred: {e}")
-        input("Press Enter to exit...")  #
+        print(f"Error initializing application: {e}")
+        messagebox.showerror("Error", f"Failed to start application: {e}")
+        exit()

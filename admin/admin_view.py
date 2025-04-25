@@ -1,13 +1,3 @@
-"""
-Admin views for the Online Music Player application.
-Includes:
-- Dashboard
-- User Management
-- Song Management
-- Playlist Management
-- Reports
-"""
-
 import os
 import sys
 import subprocess
@@ -16,13 +6,184 @@ import customtkinter as ctk
 from tkinter import messagebox, simpledialog, ttk, filedialog
 import mysql.connector
 import hashlib
-
-# Add parent directory to path so we can import from root
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import io
+from PIL import Image, ImageTk
+from mutagen.mp3 import MP3
+from mutagen.flac import FLAC
+from mutagen.wave import WAVE
+import uuid
+import re
 
 # Import from other modules
-from config import UI_CONFIG, COLORS, APP_CONFIG
-from utils import connect_db, get_admin_info, hash_password, ensure_directories_exist, generate_report, open_file
+try:
+    from db_config import UI_CONFIG, COLORS, APP_CONFIG
+    from db_utils import connect_db, hash_password, ensure_directories_exist, generate_report, open_file, get_admin_info, format_file_size
+    USE_CONFIG = True
+except ImportError:
+    print("Warning: db_config.py or db_utils.py not found. Using fallback settings.")
+    USE_CONFIG = False
+    # Modernized color scheme
+    COLORS = {
+        "primary": "#8B5CF6",     # Vibrant purple
+        "primary_hover": "#7C3AED",
+        "secondary": "#3B82F6",   # Bright blue
+        "secondary_hover": "#2563EB",
+        "success": "#10B981",     # Emerald green
+        "success_hover": "#059669",
+        "danger": "#EF4444",      # Red
+        "danger_hover": "#DC2626",
+        "warning": "#F59E0B",     # Amber
+        "warning_hover": "#D97706",
+        "background": "#111827",  # Dark gray
+        "sidebar": "#0F172A",     # Slate
+        "content": "#1F2937",     # Gray
+        "card": "#374151",        # Lighter gray
+        "text": "#F3F4F6",        # Light gray
+        "text_secondary": "#9CA3AF" # Gray
+    }
+    
+    # Updated APP_CONFIG
+    APP_CONFIG = {
+        "name": "MusicFlow Admin",
+        "version": "2.0",
+        "temp_dir": "temp",
+        "reports_dir": "reports"
+    }
+
+# Set customtkinter appearance
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+# ------------------- Database Functions -------------------
+if not USE_CONFIG:
+    def connect_db():
+        """Connect to the MySQL database"""
+        try:
+            connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="new_password",
+                database="online_music_system"
+            )
+            return connection
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Connection Error", 
+                                f"Failed to connect to database: {err}")
+            return None
+
+    def hash_password(password):
+        """Hash a password using SHA-256"""
+        return hashlib.sha256(password.encode()).hexdigest()
+        
+    def ensure_directories_exist():
+        """Ensure that necessary directories exist"""
+        directories = ["temp", "uploads", "reports"]
+        for directory in directories:
+            os.makedirs(directory, exist_ok=True)
+            
+    def format_file_size(size_bytes):
+        """Format file size from bytes to human-readable format"""
+        if not size_bytes:
+            return "0 B"
+        
+        units = ['B', 'KB', 'MB', 'GB']
+        size = float(size_bytes)
+        unit_index = 0
+        
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024.0
+            unit_index += 1
+        
+        return f"{size:.2f} {units[unit_index]}"
+        
+    def get_admin_info():
+        """Get the current admin information"""
+        try:
+            if not os.path.exists("current_admin.txt"):
+                messagebox.showerror("Error", "Admin session not found!")
+                open_admin_login_page()
+                return None
+                
+            with open("current_admin.txt", "r") as f:
+                admin_id = f.read().strip()
+                
+            if not admin_id:
+                messagebox.showerror("Error", "Admin ID not found!")
+                open_admin_login_page()
+                return None
+                
+            connection = connect_db()
+            if not connection:
+                return None
+                
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT user_id, first_name, last_name, email FROM Users WHERE user_id = %s AND is_admin = 1",
+                (admin_id,)
+            )
+            
+            admin = cursor.fetchone()
+            if not admin:
+                messagebox.showerror("Access Denied", "You do not have admin privileges!")
+                open_admin_login_page()
+                return None
+                
+            return admin
+            
+        except Exception as e:
+            print(f"Error getting admin info: {e}")
+            return None
+        finally:
+            if 'connection' in locals() and connection.is_connected():
+                cursor.close()
+                connection.close()
+                
+    def generate_report(report_type, data, filename):
+        """Generate a CSV report"""
+        try:
+            os.makedirs("reports", exist_ok=True)
+            report_path = os.path.join("reports", filename)
+            
+            with open(report_path, 'w', newline='') as file:
+                if data:
+                    header = data[0].keys()
+                    file.write(','.join([f'"{h}"' for h in header]) + '\n')
+                    
+                    for row in data:
+                        values = []
+                        for field in header:
+                            value = row[field]
+                            if isinstance(value, str):
+                                value = f'"{value.replace("\"", "\"\"")}"'
+                            elif value is None:
+                                value = '""'
+                            else:
+                                value = str(value)
+                            values.append(value)
+                        file.write(','.join(values) + '\n')
+            
+            return report_path
+        except Exception as e:
+            print(f"Error generating report: {e}")
+            return None
+            
+    def open_file(file_path):
+        """Open a file with the default application"""
+        try:
+            if os.path.exists(file_path):
+                if sys.platform == 'win32':
+                    os.startfile(file_path)
+                elif sys.platform == 'darwin':
+                    subprocess.call(['open', file_path])
+                else:
+                    subprocess.call(['xdg-open', file_path])
+                return True
+            else:
+                messagebox.showerror("Error", f"File not found: {file_path}")
+                return False
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open file: {e}")
+            return False
 
 # ------------------- System Statistics Functions -------------------
 def get_system_stats():
@@ -39,19 +200,15 @@ def get_system_stats():
             
         cursor = connection.cursor()
         
-        # Get user count
         cursor.execute("SELECT COUNT(*) FROM Users")
         total_users = cursor.fetchone()[0]
         
-        # Get song count
         cursor.execute("SELECT COUNT(*) FROM Songs")
         total_songs = cursor.fetchone()[0]
         
-        # Get playlist count
         cursor.execute("SELECT COUNT(*) FROM Playlists")
         total_playlists = cursor.fetchone()[0]
         
-        # Approximate downloads (listening history entries)
         cursor.execute("SELECT COUNT(*) FROM Listening_History")
         total_downloads = cursor.fetchone()[0]
         
@@ -71,11 +228,11 @@ def get_system_stats():
             "total_downloads": 0
         }
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
-def get_recent_activities(limit=4):
+def get_recent_activities(limit=5):
     """Get recent system activities"""
     try:
         connection = connect_db()
@@ -84,7 +241,6 @@ def get_recent_activities(limit=4):
             
         cursor = connection.cursor(dictionary=True)
         
-        # Get recent user registrations
         user_query = """
         SELECT 'user_registered' as activity_type, 
                CONCAT(first_name, ' ', last_name) as item,
@@ -94,7 +250,6 @@ def get_recent_activities(limit=4):
         LIMIT %s
         """
         
-        # Get recent song uploads
         song_query = """
         SELECT 'song_uploaded' as activity_type,
                CONCAT(s.title, ' - ', a.name) as item,
@@ -105,7 +260,6 @@ def get_recent_activities(limit=4):
         LIMIT %s
         """
         
-        # Get recent playlist creations
         playlist_query = """
         SELECT 'playlist_created' as activity_type,
                p.name as item,
@@ -115,7 +269,6 @@ def get_recent_activities(limit=4):
         LIMIT %s
         """
         
-        # Get recent listening activity (downloads)
         download_query = """
         SELECT 'song_played' as activity_type,
                CONCAT(s.title, ' - ', a.name) as item,
@@ -127,7 +280,6 @@ def get_recent_activities(limit=4):
         LIMIT %s
         """
         
-        # Execute all queries
         cursor.execute(user_query, (limit,))
         users = cursor.fetchall()
         
@@ -140,23 +292,16 @@ def get_recent_activities(limit=4):
         cursor.execute(download_query, (limit,))
         downloads = cursor.fetchall()
         
-        # Combine all activities
         all_activities = users + songs + playlists + downloads
-        
-        # Sort by timestamp (most recent first)
         all_activities.sort(key=lambda x: x["timestamp"], reverse=True)
-        
-        # Limit to requested number
         all_activities = all_activities[:limit]
         
-        # Format activities for display
         formatted_activities = []
         for activity in all_activities:
             activity_type = activity["activity_type"]
             item = activity["item"]
             timestamp = activity["timestamp"]
             
-            # Calculate relative time
             time_diff = datetime.datetime.now() - timestamp
             if time_diff.days < 1:
                 hours = time_diff.seconds // 3600
@@ -170,17 +315,16 @@ def get_recent_activities(limit=4):
             else:
                 time_str = f"{time_diff.days} days ago"
             
-            # Format action based on activity type
             if activity_type == "user_registered":
-                action = "👤 New user registered"
+                action = "👤 New user"
             elif activity_type == "song_uploaded":
-                action = "🎵 New song uploaded"
+                action = "🎵 New song"
             elif activity_type == "playlist_created":
-                action = "📁 Playlist created"
+                action = "📁 New playlist"
             elif activity_type == "song_played":
-                action = "⬇️ Song played"
+                action = "▶️ Song played"
             else:
-                action = "🔄 System activity"
+                action = "🔄 Activity"
             
             formatted_activities.append((action, item, time_str))
         
@@ -190,7 +334,7 @@ def get_recent_activities(limit=4):
         print(f"Error getting recent activities: {e}")
         return []
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -222,12 +366,12 @@ def get_all_users():
         
     except mysql.connector.Error as e:
         print(f"Error fetching users: {e}")
+        messagebox.showerror("Error", f"Failed to fetch users: {e}")
         return []
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
-
 def delete_user(user_id):
     """Delete a user from the database"""
     try:
@@ -237,7 +381,6 @@ def delete_user(user_id):
             
         cursor = connection.cursor()
         
-        # Check if this is an admin user
         cursor.execute("SELECT is_admin FROM Users WHERE user_id = %s", (user_id,))
         result = cursor.fetchone()
         
@@ -245,10 +388,7 @@ def delete_user(user_id):
             messagebox.showerror("Error", "Cannot delete an admin user.")
             return False
         
-        # The foreign key constraints with ON DELETE CASCADE should
-        # automatically delete related records in other tables
         cursor.execute("DELETE FROM Users WHERE user_id = %s", (user_id,))
-        
         connection.commit()
         return True
         
@@ -256,7 +396,7 @@ def delete_user(user_id):
         print(f"Error deleting user: {e}")
         return False
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -268,15 +408,12 @@ def toggle_admin_status(user_id, current_status):
             return False
             
         cursor = connection.cursor()
-        
-        # Toggle the admin status
         new_status = 0 if current_status else 1
         
         cursor.execute(
             "UPDATE Users SET is_admin = %s WHERE user_id = %s",
             (new_status, user_id)
         )
-        
         connection.commit()
         return True
         
@@ -284,7 +421,7 @@ def toggle_admin_status(user_id, current_status):
         print(f"Error updating admin status: {e}")
         return False
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -297,25 +434,20 @@ def add_new_user(first_name, last_name, email, password, is_admin=0):
             
         cursor = connection.cursor()
         
-        # Check if email already exists
         cursor.execute("SELECT user_id FROM Users WHERE email = %s", (email,))
         if cursor.fetchone():
-            messagebox.showerror("Error", "A user with this email already exists.")
+            messagebox.showerror("Error", "Email already exists.")
             return None
         
-        # Hash the password
         hashed_password = hash_password(password)
         
-        # Insert user
         cursor.execute(
             "INSERT INTO Users (first_name, last_name, email, password, is_admin) VALUES (%s, %s, %s, %s, %s)",
             (first_name, last_name, email, hashed_password, is_admin)
         )
         
-        # Get new user ID
         new_user_id = cursor.lastrowid
         
-        # Create default playlist for user
         cursor.execute(
             "INSERT INTO Playlists (user_id, name, description) VALUES (%s, %s, %s)",
             (new_user_id, "Favorites", "My favorite songs")
@@ -328,7 +460,7 @@ def add_new_user(first_name, last_name, email, password, is_admin=0):
         print(f"Error adding user: {e}")
         return None
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -355,16 +487,21 @@ def get_all_songs():
         cursor.execute(query)
         songs = cursor.fetchall()
         
+        for song in songs:
+            minutes, seconds = divmod(song['duration'] or 0, 60)
+            song['duration_formatted'] = f"{minutes}:{seconds:02d}"
+            song['file_size_formatted'] = format_file_size(song['file_size'])
+        
         return songs
         
     except mysql.connector.Error as e:
         print(f"Error fetching songs: {e}")
+        messagebox.showerror("Error", f"Failed to fetch songs: {e}")
         return []
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
-
 def delete_song(song_id):
     """Delete a song from the database"""
     try:
@@ -374,7 +511,6 @@ def delete_song(song_id):
             
         cursor = connection.cursor()
         
-        # First delete from related tables to avoid foreign key constraints
         tables = [
             "Playlist_Songs",
             "User_Favorites",
@@ -384,9 +520,7 @@ def delete_song(song_id):
         for table in tables:
             cursor.execute(f"DELETE FROM {table} WHERE song_id = %s", (song_id,))
         
-        # Now delete the song itself
         cursor.execute("DELETE FROM Songs WHERE song_id = %s", (song_id,))
-        
         connection.commit()
         return True
         
@@ -394,445 +528,442 @@ def delete_song(song_id):
         print(f"Error deleting song: {e}")
         return False
     finally:
-        if 'connection' in locals() and connection and connection.is_connected():
+        if 'connection' in locals() and connection.is_connected():
             cursor.close()
             connection.close()
 
-# ------------------- Report Generation Functions -------------------
-def generate_user_report():
-    """Generate a report of all users"""
-    users = get_all_users()
-    
-    # Format data for report
-    report_data = []
-    for user in users:
-        report_data.append({
-            'User ID': user['user_id'],
-            'First Name': user['first_name'],
-            'Last Name': user['last_name'],
-            'Email': user['email'],
-            'Admin': 'Yes' if user['is_admin'] else 'No',
-            'Created At': user['created_at'].strftime('%Y-%m-%d %H:%M:%S'),
-            'Playlists Count': user['playlist_count'],
-            'Listening Count': user['listening_count']
-        })
-    
-    # Generate and save the report
-    filename = "users_report.csv"
-    report_path = generate_report("users", report_data, filename)
-    
-    if report_path:
-        messagebox.showinfo("Report Generated", f"User report has been saved to: {report_path}")
-        return report_path
-    else:
-        messagebox.showerror("Error", "Failed to generate user report.")
-        return None
-
-def generate_song_report():
-    """Generate a report of all songs"""
-    songs = get_all_songs()
-    
-    # Format data for report
-    report_data = []
-    for song in songs:
-        # Format duration to MM:SS
-        minutes, seconds = divmod(song['duration'] or 0, 60)
-        duration_formatted = f"{minutes}:{seconds:02d}"
-        
-        report_data.append({
-            'Song ID': song['song_id'],
-            'Title': song['title'],
-            'Artist': song['artist_name'],
-            'Album': song['album_name'] or 'N/A',
-            'Genre': song['genre_name'] or 'N/A',
-            'Duration': duration_formatted,
-            'File Type': song['file_type'],
-            'File Size (bytes)': song['file_size'],
-            'Upload Date': song['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
-        })
-    
-    # Generate and save the report
-    filename = "songs_report.csv"
-    report_path = generate_report("songs", report_data, filename)
-    
-    if report_path:
-        messagebox.showinfo("Report Generated", f"Song report has been saved to: {report_path}")
-        return report_path
-    else:
-        messagebox.showerror("Error", "Failed to generate song report.")
-        return None
-
-def generate_activity_report():
-    """Generate a report of recent activities"""
+# ------------------- Navigation Functions -------------------
+def open_admin_login_page():
+    """Open the admin login page"""
     try:
-        connection = connect_db()
-        if not connection:
-            return None
+        if os.path.exists("current_admin.txt"):
+            os.remove("current_admin.txt")
             
-        cursor = connection.cursor(dictionary=True)
-        
-        # Query for more comprehensive activity report
-        query = """
-        SELECT 
-            'User Registration' as activity_type,
-            CONCAT(first_name, ' ', last_name) as description,
-            created_at as timestamp
-        FROM 
-            Users
-        UNION ALL
-        SELECT 
-            'Song Upload' as activity_type,
-            CONCAT(s.title, ' by ', a.name) as description,
-            s.upload_date as timestamp
-        FROM 
-            Songs s
-            JOIN Artists a ON s.artist_id = a.artist_id
-        UNION ALL
-        SELECT 
-            'Playlist Creation' as activity_type,
-            CONCAT(p.name, ' by ', u.first_name, ' ', u.last_name) as description,
-            p.created_at as timestamp
-        FROM 
-            Playlists p
-            JOIN Users u ON p.user_id = u.user_id
-        UNION ALL
-        SELECT 
-            'Song Played' as activity_type,
-            CONCAT(s.title, ' by ', a.name, ' - played by ', u.first_name, ' ', u.last_name) as description,
-            lh.played_at as timestamp
-        FROM 
-            Listening_History lh
-            JOIN Songs s ON lh.song_id = s.song_id
-            JOIN Artists a ON s.artist_id = a.artist_id
-            JOIN Users u ON lh.user_id = u.user_id
-        ORDER BY 
-            timestamp DESC
-        LIMIT 
-            500
-        """
-        
-        cursor.execute(query)
-        activities = cursor.fetchall()
-        
-        # Format data for report
-        report_data = []
-        for activity in activities:
-            report_data.append({
-                'Activity Type': activity['activity_type'],
-                'Description': activity['description'],
-                'Timestamp': activity['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
-            })
-        
-        # Generate and save the report
-        filename = "activity_report.csv"
-        report_path = generate_report("activity", report_data, filename)
-        
-        if report_path:
-            messagebox.showinfo("Report Generated", f"Activity report has been saved to: {report_path}")
-            return report_path
-        else:
-            messagebox.showerror("Error", "Failed to generate activity report.")
-            return None
-        
-    except mysql.connector.Error as e:
-        print(f"Error generating activity report: {e}")
-        return None
-    finally:
-        if 'connection' in locals() and connection and connection.is_connected():
-            cursor.close()
-            connection.close()
+        subprocess.Popen(["python", "admin_login.py"])
+        root.destroy()
+    except Exception as e:
+        messagebox.showerror("Error", f"Unable to open admin login: {e}")
 
-# ------------------- UI Functions -------------------
+def open_login_page():
+    """Logout and open the login page"""
+    try:
+        if os.path.exists("current_admin.txt"):
+            os.remove("current_admin.txt")
+            
+        subprocess.Popen(["python", "login.py"])
+        root.destroy()
+    except Exception as e:
+        messagebox.showerror("Error", f"Unable to logout: {e}")
+
+def open_main_page():
+    """Return to the main landing page"""
+    try:
+        if os.path.exists("current_admin.txt"):
+            os.remove("current_admin.txt")
+            
+        subprocess.Popen(["python", "main.py"])
+        root.destroy()
+    except Exception as e:
+        messagebox.showerror("Error", f"Unable to open main page: {e}")
+
+# ------------------- UI View Management Functions -------------------
+def clear_content_frame():
+    """Clear the content frame to load a new view"""
+    for widget in content_frame.winfo_children():
+        widget.destroy()
+
+def show_dashboard_view():
+    """Show the dashboard view"""
+    clear_content_frame()
+    admin = get_admin_info()
+    if not admin:
+        return
+    create_dashboard_frame(content_frame, admin)
+
+def show_users_view():
+    """Show the user management view"""
+    clear_content_frame()
+    admin = get_admin_info()
+    if not admin:
+        return
+    create_users_frame(content_frame, admin)
+
+def show_songs_view():
+    """Show the song management view"""
+    clear_content_frame()
+    admin = get_admin_info()
+    if not admin:
+        return
+    create_songs_frame(content_frame, admin)
+
+def show_playlist_view():
+    """Show the playlist management view"""
+    clear_content_frame()
+    admin = get_admin_info()
+    if not admin:
+        return
+    messagebox.showinfo("Coming Soon", "Playlist management view is under construction.")
+    show_dashboard_view()
+
+def show_reports_view():
+    """Show the reports view"""
+    clear_content_frame()
+    admin = get_admin_info()
+    if not admin:
+        return
+    create_reports_frame(content_frame, admin)
+
+# ------------------- Dashboard UI Functions -------------------
 def create_dashboard_frame(parent_frame, admin):
-    """Create the dashboard UI"""
-    # Get system stats
+    """Create the modernized dashboard UI"""
     stats = get_system_stats()
     
-    # Header with username
-    header_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], height=40)
-    header_frame.pack(fill="x", padx=20, pady=(20, 0))
-
-    # Left side: Admin Dashboard
-    dashboard_label = ctk.CTkLabel(header_frame, text="Admin Dashboard", 
-                                  font=("Arial", 24, "bold"), text_color="white")
-    dashboard_label.pack(side="left")
-
-    # Right side: Admin Name
-    admin_label = ctk.CTkLabel(header_frame, 
-                             text=f"Hello, {admin['first_name']} {admin['last_name']}!", 
-                             font=("Arial", 14), text_color=COLORS["text_secondary"])
-    admin_label.pack(side="right")
-
-    # Refresh button on header
-    refresh_btn = ctk.CTkButton(header_frame, text="🔄 Refresh", font=("Arial", 12), 
-                              fg_color=COLORS["secondary"], hover_color=COLORS["secondary_hover"], 
-                              text_color="white", corner_radius=5, 
-                              width=100, height=30, command=refresh_dashboard)
-    refresh_btn.pack(side="right", padx=15)
-
-    # ---------------- Quick Overview Section ----------------
-    overview_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    overview_frame.pack(fill="x", padx=20, pady=(40, 20))
-
-    # Section title
-    overview_title = ctk.CTkLabel(overview_frame, text="Quick Overview 📊", 
-                                 font=("Arial", 20, "bold"), text_color=COLORS["primary"])
-    overview_title.pack(anchor="w", pady=(0, 15))
-
-    # Stats grid container
-    stats_frame = ctk.CTkFrame(overview_frame, fg_color=COLORS["content"])
-    stats_frame.pack(fill="x")
-
-    # Stats cards
-    stat_colors = [
-        ("👥 Total Users", "#16A34A"),  # Green
-        ("🎵 Total Songs", "#2563EB"),  # Blue
-        ("📁 Playlists Created", "#FACC15"),  # Yellow
-        ("⬇️ Total Plays", "#DC2626")  # Red
+    # Main container
+    main_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Header
+    header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    header_frame.pack(fill="x", padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        header_frame,
+        text="Dashboard",
+        font=("Inter", 28, "bold"),
+        text_color=COLORS["text"]
+    ).pack(side="left")
+    
+    ctk.CTkLabel(
+        header_frame,
+        text=f"{admin['first_name']} {admin['last_name']}",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(side="right")
+    
+    ctk.CTkButton(
+        header_frame,
+        text="↻ Refresh",
+        font=("Inter", 12),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        command=refresh_dashboard,
+        width=120,
+        height=32,
+        corner_radius=8
+    ).pack(side="right", padx=10)
+    
+    # Stats section
+    stats_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    stats_frame.pack(fill="x", padx=20, pady=20)
+    
+    ctk.CTkLabel(
+        stats_frame,
+        text="System Overview",
+        font = ("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    # Stats grid
+    stats_grid = ctk.CTkFrame(stats_frame, fg_color="transparent")
+    stats_grid.pack(fill="x", padx=20, pady=10)
+    
+    stat_items = [
+        ("Users", stats["total_users"], "👥", COLORS["success"]),
+        ("Songs", stats["total_songs"], "🎵", COLORS["secondary"]),
+        ("Playlists", stats["total_playlists"], "📁", COLORS["warning"]),
+        ("Plays", stats["total_downloads"], "▶️", COLORS["danger"])
     ]
-
-    # Create global references to stat labels for updating
+    
     global user_count_label, song_count_label, playlist_count_label, download_count_label
     user_count_label = None
     song_count_label = None
     playlist_count_label = None
     download_count_label = None
-
-    # Create stats cards
-    for i, (name, color) in enumerate(stat_colors):
-        stat_card = ctk.CTkFrame(stats_frame, fg_color=COLORS["card"], corner_radius=10, width=160, height=90)
-        stat_card.pack(side="left", padx=10, expand=True)
-        stat_card.pack_propagate(False)  # Keep fixed size
+    
+    for i, (title, value, icon, color) in enumerate(stat_items):
+        card = ctk.CTkFrame(stats_grid, fg_color=COLORS["content"], corner_radius=8, border_width=1, border_color=COLORS["card"])
+        card.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
+        stats_grid.grid_columnconfigure(i, weight=1)
         
-        # Center the content vertically
-        stat_icon = ctk.CTkLabel(stat_card, text=name, font=("Arial", 12, "bold"), text_color="white")
-        stat_icon.pack(pady=(20, 5))
+        ctk.CTkLabel(
+            card,
+            text=f"{icon} {title}",
+            font=("Inter", 14, "bold"),
+            text_color=COLORS["text"]
+        ).pack(pady=(15, 5))
         
-        # Get the correct stat value
-        if i == 0:  # Users
-            stat_value = stats["total_users"]
-            user_count_label = ctk.CTkLabel(stat_card, text=str(stat_value), font=("Arial", 22, "bold"), text_color=color)
-            user_count_label.pack()
-        elif i == 1:  # Songs
-            stat_value = stats["total_songs"]
-            song_count_label = ctk.CTkLabel(stat_card, text=str(stat_value), font=("Arial", 22, "bold"), text_color=color)
-            song_count_label.pack()
-        elif i == 2:  # Playlists
-            stat_value = stats["total_playlists"]
-            playlist_count_label = ctk.CTkLabel(stat_card, text=str(stat_value), font=("Arial", 22, "bold"), text_color=color)
-            playlist_count_label.pack()
-        elif i == 3:  # Downloads/Plays
-            stat_value = stats["total_downloads"]
-            download_count_label = ctk.CTkLabel(stat_card, text=str(stat_value), font=("Arial", 22, "bold"), text_color=color)
-            download_count_label.pack()
-
-    # ---------------- Manage Actions Section ----------------
-    actions_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    actions_frame.pack(fill="x", padx=20, pady=(20, 0))
-
-    # Section title
-    actions_title = ctk.CTkLabel(actions_frame, text="Manage System ⚙️", 
-                                font=("Arial", 20, "bold"), text_color=COLORS["primary"])
-    actions_title.pack(anchor="w", pady=(0, 15))
-
-    # Action buttons container
-    buttons_frame = ctk.CTkFrame(actions_frame, fg_color=COLORS["content"])
-    buttons_frame.pack(fill="x")
-
-    # Action buttons with commands
-    manage_users_action = ctk.CTkButton(buttons_frame, text="👥 Manage Users", 
-                                       font=("Arial", 14, "bold"), 
-                                       fg_color=COLORS["primary"], hover_color=COLORS["primary_hover"], 
-                                       text_color="white", height=50, corner_radius=8,
-                                       command=lambda: show_users_view())
-    manage_users_action.pack(side="left", padx=10, expand=True)
-
-    manage_songs_action = ctk.CTkButton(buttons_frame, text="🎵 Manage Songs", 
-                                       font=("Arial", 14, "bold"), 
-                                       fg_color=COLORS["secondary"], hover_color=COLORS["secondary_hover"], 
-                                       text_color="white", height=50, corner_radius=8,
-                                       command=lambda: show_songs_view())
-    manage_songs_action.pack(side="left", padx=10, expand=True)
-
-    manage_playlists_action = ctk.CTkButton(buttons_frame, text="📁 Manage Playlists", 
-                                          font=("Arial", 14, "bold"), 
-                                          fg_color=COLORS["success"], hover_color=COLORS["success_hover"], 
-                                          text_color="white", height=50, corner_radius=8,
-                                          command=lambda: show_playlists_view())
-    manage_playlists_action.pack(side="left", padx=10, expand=True)
-
-    # ---------------- Recent Activity Section ----------------
-    activity_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    activity_frame.pack(fill="both", expand=True, padx=20, pady=(20, 20))
-
-    # Section title
-    activity_title = ctk.CTkLabel(activity_frame, text="Recent Activity 📝", 
-                                 font=("Arial", 20, "bold"), text_color=COLORS["primary"])
-    activity_title.pack(anchor="w", pady=(0, 15))
-
-    # Activity list container
-    global activity_list_frame
-    activity_list_frame = ctk.CTkFrame(activity_frame, fg_color=COLORS["card"], corner_radius=10)
-    activity_list_frame.pack(fill="both", expand=True)
-
-    # Get recent activities
-    activities = get_recent_activities()
-
-    # Display activities
-    if not activities:
-        no_activity_label = ctk.CTkLabel(
-            activity_list_frame, 
-            text="No recent activities found", 
-            font=("Arial", 12), 
-            text_color=COLORS["text_secondary"]
+        label = ctk.CTkLabel(
+            card,
+            text=str(value),
+            font=("Inter", 24, "bold"),
+            text_color=color
         )
-        no_activity_label.pack(pady=20)
+        label.pack(pady=5)
+        
+        if i == 0:
+            user_count_label = label
+        elif i == 1:
+            song_count_label = label
+        elif i == 2:
+            playlist_count_label = label
+        elif i == 3:
+            download_count_label = label
+    
+    # Actions section
+    actions_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    actions_frame.pack(fill="x", padx=20, pady=20)
+    
+    ctk.CTkLabel(
+        actions_frame,
+        text="Quick Actions",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    actions_grid = ctk.CTkFrame(actions_frame, fg_color="transparent")
+    actions_grid.pack(fill="x", padx=20, pady=10)
+    
+    action_buttons = [
+        ("Manage Users", show_users_view, COLORS["primary"]),
+        ("Manage Songs", show_songs_view, COLORS["secondary"]),
+        #("Manage Playlists", show_playlist_view, COLORS["success"])
+    ]
+    
+    for i, (text, command, color) in enumerate(action_buttons):
+        btn = ctk.CTkButton(
+            actions_grid,
+            text=text,
+            command=command,
+            font=("Inter", 14),
+            fg_color=color,
+            #hover_color=COLORS[f"{color[1:]}_hover"] if color != COLORS["primary"] else COLORS["primary_hover"],
+            height=48,
+            corner_radius=8
+        )
+        btn.grid(row=0, column=i, padx=10, pady=10, sticky="ew")
+        actions_grid.grid_columnconfigure(i, weight=1)
+    
+    # Recent activity section
+    activity_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    activity_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    ctk.CTkLabel(
+        activity_frame,
+        text="Recent Activity",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    global activity_doc_frame
+    activity_doc_frame = ctk.CTkFrame(activity_frame, fg_color="transparent")
+    activity_doc_frame.pack(fill="both", expand=True, padx=20, pady=10)
+    
+    activities = get_recent_activities()
+    
+    if not activities:
+        ctk.CTkLabel(
+            activity_doc_frame,
+            text="No recent activities",
+            font=("Inter", 14),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=20)
     else:
         for action, item, time in activities:
-            activity_item = ctk.CTkFrame(activity_list_frame, fg_color=COLORS["card"], height=40)
-            activity_item.pack(fill="x", padx=10, pady=5)
+            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["content"], corner_radius=8)
+            activity_item.pack(fill="x", pady=5)
             
-            action_label = ctk.CTkLabel(activity_item, text=action, font=("Arial", 12, "bold"), text_color="white")
-            action_label.pack(side="left", padx=10)
+            ctk.CTkLabel(
+                activity_item,
+                text=action,
+                font=("Inter", 14, "bold"),
+                text_color=COLORS["text"]
+            ).pack(side="left", padx=15, pady=10)
             
-            item_label = ctk.CTkLabel(activity_item, text=item, font=("Arial", 12), text_color=COLORS["text_secondary"])
-            item_label.pack(side="left", padx=10)
+            ctk.CTkLabel(
+                activity_item,
+                text=item,
+                font=("Inter", 14),
+                text_color=COLORS["text_secondary"]
+            ).pack(side="left", padx=10)
             
-            time_label = ctk.CTkLabel(activity_item, text=time, font=("Arial", 12), text_color=COLORS["primary"])
-            time_label.pack(side="right", padx=10)
-    
-    return parent_frame
+            ctk.CTkLabel(
+                activity_item,
+                text=time,
+                font=("Inter", 14),
+                text_color=COLORS["primary"]
+            ).pack(side="right", padx=15)
 
+def refresh_dashboard():
+    """Refresh the dashboard data"""
+    stats = get_system_stats()
+    
+    user_count_label.configure(text=str(stats["total_users"]))
+    song_count_label.configure(text=str(stats["total_songs"]))
+    playlist_count_label.configure(text=str(stats["total_playlists"]))
+    download_count_label.configure(text=str(stats["total_downloads"]))
+    
+    for widget in activity_doc_frame.winfo_children():
+        widget.destroy()
+    
+    activities = get_recent_activities()
+    
+    if not activities:
+        ctk.CTkLabel(
+            activity_doc_frame,
+            text="No recent activities",
+            font=("Inter", 14),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=20)
+    else:
+        for action, item, time in activities:
+            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["content"], corner_radius=8)
+            activity_item.pack(fill="x", pady=5)
+            
+            ctk.CTkLabel(
+                activity_item,
+                text=action,
+                font=("Inter", 14, "bold"),
+                text_color=COLORS["text"]
+            ).pack(side="left", padx=15, pady=10)
+            
+            ctk.CTkLabel(
+                activity_item,
+                text=item,
+                font=("Inter", 14),
+                text_color=COLORS["text_secondary"]
+            ).pack(side="left", padx=10)
+            
+            ctk.CTkLabel(
+                activity_item,
+                text=time,
+                font=("Inter", 14),
+                text_color=COLORS["primary"]
+            ).pack(side="right", padx=15)
+
+# ------------------- User Management UI Functions -------------------
 def create_users_frame(parent_frame, admin):
-    """Create the user management UI"""
+    """Create the modernized user management UI"""
+    main_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
     # Header
-    header_frame = ctk.CTkFrame(parent_frame, height=60, fg_color=COLORS["card"])
-    header_frame.pack(fill="x", padx=10, pady=10)
+    header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    header_frame.pack(fill="x", padx=20, pady=(20, 10))
     
-    # Title
-    ctk.CTkLabel(
-        header_frame, 
-        text="Manage Users", 
-        font=("Arial", 24, "bold"),
-        text_color=COLORS["primary"]
-    ).pack(side="left", padx=20)
-    
-    # Admin name
     ctk.CTkLabel(
         header_frame,
-        text=f"Admin: {admin['first_name']} {admin['last_name']}",
-        font=("Arial", 14)
-    ).pack(side="right", padx=20)
+        text="Manage Users",
+        font=("Inter", 28, "bold"),
+        text_color=COLORS["text"]
+    ).pack(side="left")
     
-    # Back button
-    back_btn = ctk.CTkButton(
+    ctk.CTkLabel(
         header_frame,
-        text="← Back to Dashboard",
-        command=lambda: show_dashboard_view(),
+        text=f"{admin['first_name']} {admin['last_name']}",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(side="right")
+    
+    ctk.CTkButton(
+        header_frame,
+        text="← Back",
+        font=("Inter", 12),
         fg_color=COLORS["secondary"],
         hover_color=COLORS["secondary_hover"],
-        height=32
-    )
-    back_btn.pack(side="right", padx=20)
+        command=show_dashboard_view,
+        width=120,
+        height=32,
+        corner_radius=8
+    ).pack(side="right", padx=10)
     
-    # Content area
-    content_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    content_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    # Actions
+    actions_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    actions_frame.pack(fill="x", padx=20, pady=10)
     
-    # Action buttons
-    action_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["content"], height=50)
-    action_frame.pack(fill="x", padx=20, pady=20)
-    
-    # Add user button
-    add_btn = ctk.CTkButton(
-        action_frame,
-        text="+ Add New User",
-        command=lambda: handle_add_user(),
+    ctk.CTkButton(
+        actions_frame,
+        text="+ Add User",
+        font=("Inter", 14),
         fg_color=COLORS["success"],
         hover_color=COLORS["success_hover"],
-        height=40
-    )
-    add_btn.pack(side="left", padx=(0, 10))
+        command=handle_add_user,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
     
-    # Delete user button
-    delete_btn = ctk.CTkButton(
-        action_frame,
-        text="🗑️ Delete Selected User",
-        command=lambda: confirm_delete_user(),
+    ctk.CTkButton(
+        actions_frame,
+        text="🗑 Delete",
+        font=("Inter", 14),
         fg_color=COLORS["danger"],
         hover_color=COLORS["danger_hover"],
-        height=40
-    )
-    delete_btn.pack(side="left", padx=(0, 10))
+        command=confirm_delete_user,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
     
-    # Toggle admin button
-    toggle_admin_btn = ctk.CTkButton(
-        action_frame,
-        text="👑 Toggle Admin Status",
-        command=lambda: toggle_selected_admin_status(),
+    ctk.CTkButton(
+        actions_frame,
+        text="👑 Admin",
+        font=("Inter", 14),
         fg_color=COLORS["warning"],
         hover_color=COLORS["warning_hover"],
-        text_color="black",
-        height=40
-    )
-    toggle_admin_btn.pack(side="left")
+        command=toggle_selected_admin_status,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
     
-    # Refresh button
-    refresh_btn = ctk.CTkButton(
-        action_frame,
-        text="🔄 Refresh List",
-        command=lambda: refresh_user_list(),
+    ctk.CTkButton(
+        actions_frame,
+        text="↻ Refresh",
+        font=("Inter", 14),
         fg_color=COLORS["primary"],
         hover_color=COLORS["primary_hover"],
-        height=40
-    )
-    refresh_btn.pack(side="right")
+        command=refresh_user_list,
+        height=40,
+        corner_radius=8
+    ).pack(side="right")
     
-    # Users list with scrollbar
-    users_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["card"])
-    users_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+    # Users table
+    table_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    table_frame.pack(fill="both", expand=True, padx=20, pady=20)
     
-    # Create Treeview with ttk.Scrollbar
-    tree_frame = ctk.CTkFrame(users_frame)
-    tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
-    
-    # Create a custom style for the Treeview
     style = ttk.Style()
     style.theme_use("default")
-    
-    # Configure colors for dark mode
     style.configure(
         "Treeview",
+        background=COLORS["content"],
+        foreground=COLORS["text"],
+        fieldbackground=COLORS["content"],
+        borderwidth=0,
+        rowheight=30
+    )
+    style.configure(
+        "Treeview.Heading",
         background=COLORS["card"],
-        foreground="white",
-        fieldbackground=COLORS["card"],
-        borderwidth=0
+        foreground=COLORS["text"],
+        font=("Inter", 12, "bold")
     )
     style.map(
-        "Treeview", 
+        "Treeview",
         background=[("selected", COLORS["primary"])],
-        foreground=[("selected", "white")]
+        foreground=[("selected", COLORS["text"])]
     )
     
-    # Add scrollbar
-    tree_scroll = ttk.Scrollbar(tree_frame)
+    tree_scroll = ttk.Scrollbar(table_frame)
     tree_scroll.pack(side="right", fill="y")
     
-    # Create Treeview with columns
     global users_tree
     users_tree = ttk.Treeview(
-        tree_frame,
+        table_frame,
         columns=("id", "name", "email", "admin", "created", "playlists", "history", "user_id"),
         show="headings",
-        height=20,
         yscrollcommand=tree_scroll.set
     )
-    users_tree.pack(fill="both", expand=True)
+    users_tree.pack(fill="both", expand=True, padx=10, pady=10)
     
-    # Configure scrollbar
     tree_scroll.config(command=users_tree.yview)
     
-    # Format columns
     users_tree.heading("id", text="#")
     users_tree.heading("name", text="Name")
     users_tree.heading("email", text="Email")
@@ -842,403 +973,53 @@ def create_users_frame(parent_frame, admin):
     users_tree.heading("history", text="Plays")
     users_tree.heading("user_id", text="ID")
     
-    # Set column widths and alignment
-    users_tree.column("id", width=40, anchor="center")
-    users_tree.column("name", width=180, anchor="w")
-    users_tree.column("email", width=200, anchor="w")
+    users_tree.column("id", width=50, anchor="center")
+    users_tree.column("name", width=200, anchor="w")
+    users_tree.column("email", width=250, anchor="w")
     users_tree.column("admin", width=80, anchor="center")
-    users_tree.column("created", width=100, anchor="center")
+    users_tree.column("created", width=120, anchor="center")
     users_tree.column("playlists", width=80, anchor="center")
     users_tree.column("history", width=80, anchor="center")
-    users_tree.column("user_id", width=50, anchor="center")
+    users_tree.column("user_id", width=80, anchor="center")
     
-    # Statistics footer
-    stats_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["content"], height=30)
-    stats_frame.pack(fill="x", padx=20, pady=(0, 10))
+    # Footer
+    footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    footer_frame.pack(fill="x", padx=20, pady=(0, 20))
     
     global stats_label
     stats_label = ctk.CTkLabel(
-        stats_frame,
+        footer_frame,
         text="Loading users...",
-        font=("Arial", 12),
+        font=("Inter", 14),
         text_color=COLORS["text_secondary"]
     )
     stats_label.pack(side="left")
-
-    # Generate report button
-    report_btn = ctk.CTkButton(
-        stats_frame,
-        text="📊 Generate Report",
-        command=lambda: generate_and_open_user_report(),
+    
+    ctk.CTkButton(
+        footer_frame,
+        text="📊 Report",
+        font=("Inter", 14),
         fg_color=COLORS["secondary"],
         hover_color=COLORS["secondary_hover"],
-        height=30
-    )
-    report_btn.pack(side="right")
+        command=generate_and_open_user_report,
+        height=32,
+        corner_radius=8
+    ).pack(side="right")
     
-    # Initial load of users
     refresh_user_list()
-    
-    return parent_frame
-
-def create_songs_frame(parent_frame, admin):
-    """Create the song management UI"""
-    # Header
-    header_frame = ctk.CTkFrame(parent_frame, height=60, fg_color=COLORS["card"])
-    header_frame.pack(fill="x", padx=10, pady=10)
-    
-    # Title
-    ctk.CTkLabel(
-        header_frame, 
-        text="Manage Songs", 
-        font=("Arial", 24, "bold"),
-        text_color=COLORS["primary"]
-    ).pack(side="left", padx=20)
-    
-    # Admin name
-    ctk.CTkLabel(
-        header_frame,
-        text=f"Admin: {admin['first_name']} {admin['last_name']}",
-        font=("Arial", 14)
-    ).pack(side="right", padx=20)
-    
-    # Back button
-    back_btn = ctk.CTkButton(
-        header_frame,
-        text="← Back to Dashboard",
-        command=lambda: show_dashboard_view(),
-        fg_color=COLORS["secondary"],
-        hover_color=COLORS["secondary_hover"],
-        height=32
-    )
-    back_btn.pack(side="right", padx=20)
-    
-    # Content area
-    content_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    content_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-    
-    # Action buttons
-    action_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["content"], height=50)
-    action_frame.pack(fill="x", padx=20, pady=20)
-    
-    # Upload button
-    upload_btn = ctk.CTkButton(
-        action_frame,
-        text="+ Upload New Song",
-        command=lambda: handle_upload_song(),
-        fg_color=COLORS["success"],
-        hover_color=COLORS["success_hover"],
-        height=40
-    )
-    upload_btn.pack(side="left", padx=(0, 10))
-    
-    # Delete button
-    delete_btn = ctk.CTkButton(
-        action_frame,
-        text="🗑️ Delete Selected Song",
-        command=lambda: confirm_delete_song(),
-        fg_color=COLORS["danger"],
-        hover_color=COLORS["danger_hover"],
-        height=40
-    )
-    delete_btn.pack(side="left")
-    
-    # Refresh button
-    refresh_btn = ctk.CTkButton(
-        action_frame,
-        text="🔄 Refresh List",
-        command=lambda: refresh_song_list(),
-        fg_color=COLORS["primary"],
-        hover_color=COLORS["primary_hover"],
-        height=40
-    )
-    refresh_btn.pack(side="right")
-    
-    # Songs list with scrollbar
-    songs_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["card"])
-    songs_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-    
-    # Create Treeview with ttk.Scrollbar
-    tree_frame = ctk.CTkFrame(songs_frame)
-    tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
-    
-    # Create a custom style for the Treeview
-    style = ttk.Style()
-    style.theme_use("default")
-    
-    # Configure colors for dark mode
-    style.configure(
-        "Treeview",
-        background=COLORS["card"],
-        foreground="white",
-        fieldbackground=COLORS["card"],
-        borderwidth=0
-    )
-    style.map(
-        "Treeview", 
-        background=[("selected", COLORS["primary"])],
-        foreground=[("selected", "white")]
-    )
-    
-    # Add scrollbar
-    tree_scroll = ttk.Scrollbar(tree_frame)
-    tree_scroll.pack(side="right", fill="y")
-    
-    # Create Treeview with columns
-    global songs_tree
-    songs_tree = ttk.Treeview(
-        tree_frame,
-        columns=("id", "title", "artist", "genre", "duration", "size", "song_id"),
-        show="headings",
-        height=20,
-        yscrollcommand=tree_scroll.set
-    )
-    songs_tree.pack(fill="both", expand=True)
-    
-    # Configure scrollbar
-    tree_scroll.config(command=songs_tree.yview)
-    
-    # Format columns
-    songs_tree.heading("id", text="#")
-    songs_tree.heading("title", text="Title")
-    songs_tree.heading("artist", text="Artist")
-    songs_tree.heading("genre", text="Genre")
-    songs_tree.heading("duration", text="Duration")
-    songs_tree.heading("size", text="Size")
-    songs_tree.heading("song_id", text="ID")
-    
-    # Set column widths and alignment
-    songs_tree.column("id", width=50, anchor="center")
-    songs_tree.column("title", width=250, anchor="w")
-    songs_tree.column("artist", width=150, anchor="w")
-    songs_tree.column("genre", width=100, anchor="w")
-    songs_tree.column("duration", width=80, anchor="center")
-    songs_tree.column("size", width=80, anchor="e")
-    songs_tree.column("song_id", width=50, anchor="center")
-    
-    # Statistics footer
-    stats_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["content"], height=30)
-    stats_frame.pack(fill="x", padx=20, pady=(0, 10))
-    
-    global song_stats_label
-    song_stats_label = ctk.CTkLabel(
-        stats_frame,
-        text="Loading songs...",
-        font=("Arial", 12),
-        text_color=COLORS["text_secondary"]
-    )
-    song_stats_label.pack(side="left")
-    
-    # Generate report button
-    report_btn = ctk.CTkButton(
-        stats_frame,
-        text="📊 Generate Report",
-        command=lambda: generate_and_open_song_report(),
-        fg_color=COLORS["secondary"],
-        hover_color=COLORS["secondary_hover"],
-        height=30
-    )
-    report_btn.pack(side="right")
-    
-    # Initial load of songs
-    refresh_song_list()
-    
-    return parent_frame
-
-def create_reports_frame(parent_frame, admin):
-    """Create the reports UI"""
-    # Header
-    header_frame = ctk.CTkFrame(parent_frame, height=60, fg_color=COLORS["card"])
-    header_frame.pack(fill="x", padx=10, pady=10)
-    
-    # Title
-    ctk.CTkLabel(
-        header_frame, 
-        text="Reports & Analytics", 
-        font=("Arial", 24, "bold"),
-        text_color=COLORS["primary"]
-    ).pack(side="left", padx=20)
-    
-    # Admin name
-    ctk.CTkLabel(
-        header_frame,
-        text=f"Admin: {admin['first_name']} {admin['last_name']}",
-        font=("Arial", 14)
-    ).pack(side="right", padx=20)
-    
-    # Back button
-    back_btn = ctk.CTkButton(
-        header_frame,
-        text="← Back to Dashboard",
-        command=lambda: show_dashboard_view(),
-        fg_color=COLORS["secondary"],
-        hover_color=COLORS["secondary_hover"],
-        height=32
-    )
-    back_btn.pack(side="right", padx=20)
-    
-    # Content area
-    content_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"])
-    content_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-    
-    # Title
-    ctk.CTkLabel(
-        content_frame,
-        text="Generate and Download Reports",
-        font=("Arial", 20, "bold"),
-        text_color="white"
-    ).pack(pady=(20, 10))
-    
-    # Description
-    ctk.CTkLabel(
-        content_frame,
-        text="Generate CSV reports for system data and analysis",
-        font=("Arial", 14),
-        text_color=COLORS["text_secondary"]
-    ).pack(pady=(0, 30))
-    
-    # Reports container
-    reports_container = ctk.CTkFrame(content_frame, fg_color=COLORS["content"])
-    reports_container.pack(fill="both", expand=True, padx=40)
-    
-    # Grid of report options
-    reports = [
-        {
-            "title": "User Report", 
-            "description": "List of all users with their activity data",
-            "icon": "👤",
-            "command": generate_and_open_user_report
-        },
-        {
-            "title": "Song Report", 
-            "description": "List of all songs in the system",
-            "icon": "🎵",
-            "command": generate_and_open_song_report
-        },
-        {
-            "title": "Activity Report", 
-            "description": "Recent system activities (registrations, uploads, etc.)",
-            "icon": "📊",
-            "command": generate_and_open_activity_report
-        }
-    ]
-    
-    for i, report in enumerate(reports):
-        report_card = ctk.CTkFrame(reports_container, fg_color=COLORS["card"], corner_radius=10)
-        report_card.pack(fill="x", pady=10, ipady=20)
-        
-        # Icon
-        icon_label = ctk.CTkLabel(report_card, text=report["icon"], font=("Arial", 30))
-        icon_label.pack(side="left", padx=20)
-        
-        # Info container
-        info_frame = ctk.CTkFrame(report_card, fg_color=COLORS["card"])
-        info_frame.pack(side="left", fill="both", expand=True, padx=10)
-        
-        # Title
-        ctk.CTkLabel(
-            info_frame, 
-            text=report["title"], 
-            font=("Arial", 16, "bold"), 
-            text_color="white"
-        ).pack(anchor="w")
-        
-        # Description
-        ctk.CTkLabel(
-            info_frame, 
-            text=report["description"], 
-            font=("Arial", 12), 
-            text_color=COLORS["text_secondary"]
-        ).pack(anchor="w", pady=(5, 0))
-        
-        # Generate button
-        generate_btn = ctk.CTkButton(
-            report_card,
-            text="Generate Report",
-            command=report["command"],
-            font=("Arial", 14),
-            fg_color=COLORS["primary"],
-            hover_color=COLORS["primary_hover"],
-            height=36,
-            width=160
-        )
-        generate_btn.pack(side="right", padx=20)
-    
-    # Note about reports
-    note_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["content"])
-    note_frame.pack(fill="x", padx=20, pady=20)
-    
-    ctk.CTkLabel(
-        note_frame,
-        text="Note: Reports are saved in the 'reports' folder and will open automatically after generation.",
-        font=("Arial", 12, "italic"),
-        text_color=COLORS["text_secondary"]
-    ).pack()
-    
-    return parent_frame
-
-# ------------------- Helper Functions -------------------
-def refresh_dashboard():
-    """Refresh the dashboard data"""
-    # Update stats
-    stats = get_system_stats()
-    
-    # Update stat values
-    user_count_label.configure(text=str(stats["total_users"]))
-    song_count_label.configure(text=str(stats["total_songs"]))
-    playlist_count_label.configure(text=str(stats["total_playlists"]))
-    download_count_label.configure(text=str(stats["total_downloads"]))
-    
-    # Update recent activities
-    # First, clear existing activities
-    for widget in activity_list_frame.winfo_children():
-        widget.destroy()
-    
-    # Get fresh activities
-    activities = get_recent_activities()
-    
-    # Display activities
-    if not activities:
-        no_activity_label = ctk.CTkLabel(
-            activity_list_frame, 
-            text="No recent activities found", 
-            font=("Arial", 12), 
-            text_color=COLORS["text_secondary"]
-        )
-        no_activity_label.pack(pady=20)
-    else:
-        for action, item, time in activities:
-            activity_item = ctk.CTkFrame(activity_list_frame, fg_color=COLORS["card"], height=40)
-            activity_item.pack(fill="x", padx=10, pady=5)
-            
-            action_label = ctk.CTkLabel(activity_item, text=action, font=("Arial", 12, "bold"), text_color="white")
-            action_label.pack(side="left", padx=10)
-            
-            item_label = ctk.CTkLabel(activity_item, text=item, font=("Arial", 12), text_color=COLORS["text_secondary"])
-            item_label.pack(side="left", padx=10)
-            
-            time_label = ctk.CTkLabel(activity_item, text=time, font=("Arial", 12), text_color=COLORS["primary"])
-            time_label.pack(side="right", padx=10)
 
 def refresh_user_list():
     """Refresh the user list display"""
-    # Clear the treeview
     for item in users_tree.get_children():
         users_tree.delete(item)
     
-    # Get updated users
     users = get_all_users()
     
-    # Add users to treeview
     for i, user in enumerate(users, 1):
-        # Format admin status
         admin_status = "Yes" if user["is_admin"] else "No"
-        
-        # Format created date
         created_date = user["created_at"].strftime("%Y-%m-%d")
-        
         users_tree.insert(
-            "", "end", 
+            "", "end",
             values=(
                 i,
                 f"{user['first_name']} {user['last_name']}",
@@ -1251,70 +1032,26 @@ def refresh_user_list():
             )
         )
     
-    # Update stats
     stats_label.configure(text=f"Total Users: {len(users_tree.get_children())}")
-
-def refresh_song_list():
-    """Refresh the song list display"""
-    # Clear the treeview
-    for item in songs_tree.get_children():
-        songs_tree.delete(item)
-    
-    # Get updated songs
-    songs = get_all_songs()
-    
-    # Add songs to treeview
-    for i, song in enumerate(songs, 1):
-        # Format durations to MM:SS
-        minutes, seconds = divmod(song['duration'] or 0, 60)
-        duration_formatted = f"{minutes}:{seconds:02d}"
-        
-        # Format file size
-        file_size = ""
-        if song['file_size']:
-            # Get size in KB or MB
-            size = song['file_size']
-            if size > 1024 * 1024:  # MB
-                file_size = f"{size / (1024 * 1024):.1f} MB"
-            else:  # KB
-                file_size = f"{size / 1024:.1f} KB"
-        
-        songs_tree.insert(
-            "", "end", 
-            values=(
-                i,
-                song["title"], 
-                song["artist_name"], 
-                song["genre_name"] or "", 
-                duration_formatted, 
-                file_size,
-                song["song_id"]
-            )
-        )
-    
-    # Update stats
-    song_stats_label.configure(text=f"Total Songs: {len(songs_tree.get_children())}")
 
 def confirm_delete_user():
     """Confirm and delete selected user"""
     selected = users_tree.selection()
     if not selected:
-        messagebox.showwarning("Selection Required", "Please select a user to delete.")
+        messagebox.showwarning("Warning", "Please select a user.")
         return
     
-    # Get the user ID from the selected item
-    user_id = users_tree.item(selected, 'values')[-1]  # Last column contains user_id
-    user_name = users_tree.item(selected, 'values')[1]  # Second column contains name
+    user_id = users_tree.item(selected, 'values')[-1]
+    user_name = users_tree.item(selected, 'values')[1]
     
-    # Confirmation dialog
     confirm = messagebox.askyesno(
-        "Confirm Delete", 
-        f"Are you sure you want to delete the user '{user_name}'?\n\nThis will delete ALL data associated with this user, including playlists and listening history.\n\nThis action cannot be undone."
+        "Confirm Delete",
+        f"Delete user '{user_name}'? This action is irreversible."
     )
     
     if confirm:
         if delete_user(user_id):
-            messagebox.showinfo("Success", f"User '{user_name}' deleted successfully!")
+            messagebox.showinfo("Success", f"User '{user_name}' deleted.")
             refresh_user_list()
         else:
             messagebox.showerror("Error", f"Failed to delete user '{user_name}'.")
@@ -1323,24 +1060,1039 @@ def toggle_selected_admin_status():
     """Toggle admin status for selected user"""
     selected = users_tree.selection()
     if not selected:
-        messagebox.showwarning("Selection Required", "Please select a user to modify.")
+        messagebox.showwarning("Warning", "Please select a user.")
         return
     
-    # Get the user info from the selected item
-    user_id = users_tree.item(selected, 'values')[-1]  # Last column contains user_id
-    user_name = users_tree.item(selected, 'values')[1]  # Second column contains name
-    current_status = users_tree.item(selected, 'values')[3] == "Yes"  # Fourth column is admin status
+    user_id = users_tree.item(selected, 'values')[-1]
+    user_name = users_tree.item(selected, 'values')[1]
+    current_status = users_tree.item(selected, 'values')[3] == "Yes"
     
-    # New status message
-    new_status_msg = "remove admin privileges from" if current_status else "grant admin privileges to"
-    
-    # Confirmation dialog
+    action = "remove admin privileges from" if current_status else "grant admin privileges to"
     confirm = messagebox.askyesno(
-        "Confirm Admin Status Change", 
-        f"Are you sure you want to {new_status_msg} '{user_name}'?"
+        "Confirm",
+        f"{action.capitalize()} '{user_name}'?"
     )
     
     if confirm:
         if toggle_admin_status(user_id, current_status):
-            status_msg = "removed from" if current_status else "granted to"
-            messagebox.showinfo("Success", f"Admin privileges {status_msg} '{user_name}' successfully!")
+            status = "removed from" if current_status else "granted to"
+            messagebox.showinfo("Success", f"Admin privileges {status} '{user_name}'.")
+            refresh_user_list()
+        else:
+            messagebox.showerror("Error", f"Failed to update admin status for '{user_name}'.")
+
+def handle_add_user():
+    """Display dialog to add a new user"""
+    dialog = ctk.CTkToplevel(root)
+    dialog.title("Add User")
+    dialog.geometry("400x500")
+    dialog.transient(root)
+    dialog.grab_set()
+    
+    dialog.update_idletasks()
+    width = dialog.winfo_width()
+    height = dialog.winfo_height()
+    x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+    y = (dialog.winfo_screenheight() // 2) - (height // 2)
+    dialog.geometry(f"{width}x{height}+{x}+{y}")
+    
+    ctk.CTkLabel(
+        dialog,
+        text="Add New User",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["text"]
+    ).pack(pady=20)
+    
+    # Form fields
+    fields = [
+        ("First Name", ctk.StringVar()),
+        ("Last Name", ctk.StringVar()),
+        ("Email", ctk.StringVar()),
+        ("Password", ctk.StringVar()),
+        ("Confirm Password", ctk.StringVar())
+    ]
+    
+    entries = {}
+    for label, var in fields:
+        frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        frame.pack(fill="x", padx=20, pady=5)
+        
+        ctk.CTkLabel(
+            frame,
+            text=label,
+            font=("Inter", 12),
+            width=100,
+            text_color=COLORS["text"]
+        ).pack(side="left")
+        
+        entry = ctk.CTkEntry(
+            frame,
+            textvariable=var,
+            width=200,
+            font=("Inter", 12),
+            show="*" if "Password" in label else ""
+        )
+        entry.pack(side="left", padx=5)
+        entries[label] = entry
+    
+    admin_var = ctk.BooleanVar(value=False)
+    ctk.CTkCheckBox(
+        dialog,
+        text="Grant Admin Privileges",
+        variable=admin_var,
+        font=("Inter", 12),
+        text_color=COLORS["text"]
+    ).pack(pady=15)
+    
+    def do_add_user():
+        first_name = fields[0][1].get().strip()
+        last_name = fields[1][1].get().strip()
+        email = fields[2][1].get().strip()
+        password = fields[3][1].get()
+        confirm_password = fields[4][1].get()
+        is_admin = 1 if admin_var.get() else 0
+        
+        if not all([first_name, last_name, email, password]):
+            messagebox.showwarning("Warning", "All fields are required.")
+            return
+            
+        if password != confirm_password:
+            messagebox.showwarning("Warning", "Passwords do not match.")
+            return
+            
+        if len(password) < 8:
+            messagebox.showwarning("Warning", "Password must be at least 8 characters.")
+            return
+            
+        email_pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        if not re.match(email_pattern, email):
+            messagebox.showwarning("Warning", "Invalid email address.")
+            return
+        
+        new_user_id = add_new_user(first_name, last_name, email, password, is_admin)
+        if new_user_id:
+            messagebox.showinfo("Success", f"User '{first_name} {last_name}' added.")
+            dialog.destroy()
+            refresh_user_list()
+        else:
+            messagebox.showerror("Error", "Failed to add user.")
+    
+    ctk.CTkButton(
+        dialog,
+        text="Add User",
+        font=("Inter", 14),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        command=do_add_user,
+        height=40,
+        corner_radius=8
+    ).pack(pady=20)
+
+def generate_and_open_user_report():
+    """Generate a user report and open it"""
+    users = get_all_users()
+    
+    report_data = [
+        {
+            'User ID': user['user_id'],
+            'First Name': user['first_name'],
+            'Last Name': user['last_name'],
+            'Email': user['email'],
+            'Admin': 'Yes' if user['is_admin'] else 'No',
+            'Created At': user['created_at'].strftime('%Y-%m-%d %H:%M:%S'),
+            'Playlists': user['playlist_count'],
+            'Plays': user['listening_count']
+        } for user in users
+    ]
+    
+    filename = f"users_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    report_path = generate_report("users", report_data, filename)
+    
+    if report_path:
+        messagebox.showinfo("Success", f"Report saved to: {report_path}")
+        open_file(report_path)
+    else:
+        messagebox.showerror("Error", "Failed to generate report.")
+
+# ------------------- Song Management UI Functions -------------------
+def create_songs_frame(parent_frame, admin):
+    """Create the modernized song management UI"""
+    main_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Header
+    header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    header_frame.pack(fill="x", padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        header_frame,
+        text="Manage Songs",
+        font=("Inter", 28, "bold"),
+        text_color=COLORS["text"]
+    ).pack(side="left")
+    
+    ctk.CTkLabel(
+        header_frame,
+        text=f"{admin['first_name']} {admin['last_name']}",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(side="right")
+    
+    ctk.CTkButton(
+        header_frame,
+        text="← Back",
+        font=("Inter", 12),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        command=show_dashboard_view,
+        width=120,
+        height=32,
+        corner_radius=8
+    ).pack(side="right", padx=10)
+    
+    # Actions
+    actions_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    actions_frame.pack(fill="x", padx=20, pady=10)
+    
+    ctk.CTkButton(
+        actions_frame,
+        text="+ Upload Song",
+        font=("Inter", 14),
+        fg_color=COLORS["success"],
+        hover_color=COLORS["success_hover"],
+        command=handle_upload_song,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
+    
+    ctk.CTkButton(
+        actions_frame,
+        text="🗑 Delete",
+        font=("Inter", 14),
+        fg_color=COLORS["danger"],
+        hover_color=COLORS["danger_hover"],
+        command=confirm_delete_song,
+        height=40,
+        corner_radius=8
+    ).pack(side="left")
+    
+    ctk.CTkButton(
+        actions_frame,
+        text="↻ Refresh",
+        font=("Inter", 14),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        command=refresh_song_list,
+        height=40,
+        corner_radius=8
+    ).pack(side="right")
+    
+    # Songs table
+    table_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    table_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    style = ttk.Style()
+    style.theme_use("default")
+    style.configure(
+        "Treeview",
+        background=COLORS["content"],
+        foreground=COLORS["text"],
+        fieldbackground=COLORS["content"],
+        borderwidth=0,
+        rowheight=30
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=COLORS["card"],
+        foreground=COLORS["text"],
+        font=("Inter", 12, "bold")
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", COLORS["primary"])],
+        foreground=[("selected", COLORS["text"])]
+    )
+    
+    tree_scroll = ttk.Scrollbar(table_frame)
+    tree_scroll.pack(side="right", fill="y")
+    
+    global songs_tree
+    songs_tree = ttk.Treeview(
+        table_frame,
+        columns=("id", "title", "artist", "genre", "duration", "size", "song_id"),
+        show="headings",
+        yscrollcommand=tree_scroll.set
+    )
+    songs_tree.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    tree_scroll.config(command=songs_tree.yview)
+    
+    songs_tree.heading("id", text="#")
+    songs_tree.heading("title", text="Title")
+    songs_tree.heading("artist", text="Artist")
+    songs_tree.heading("genre", text="Genre")
+    songs_tree.heading("duration", text="Duration")
+    songs_tree.heading("size", text="Size")
+    songs_tree.heading("song_id", text="ID")
+    
+    songs_tree.column("id", width=50, anchor="center")
+    songs_tree.column("title", width=250, anchor="w")
+    songs_tree.column("artist", width=200, anchor="w")
+    songs_tree.column("genre", width=120, anchor="w")
+    songs_tree.column("duration", width=80, anchor="center")
+    songs_tree.column("size", width=100, anchor="e")
+    songs_tree.column("song_id", width=80, anchor="center")
+    
+    # Footer
+    footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    footer_frame.pack(fill="x", padx=20, pady=(0, 20))
+    
+    global song_stats_label
+    song_stats_label = ctk.CTkLabel(
+        footer_frame,
+        text="Loading songs...",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    )
+    song_stats_label.pack(side="left")
+    
+    ctk.CTkButton(
+        footer_frame,
+        text="📊 Report",
+        font=("Inter", 14),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        command=generate_and_open_song_report,
+        height=32,
+        corner_radius=8
+    ).pack(side="right")
+    
+    refresh_song_list()
+
+def refresh_song_list():
+    """Refresh the song list display"""
+    for item in songs_tree.get_children():
+        songs_tree.delete(item)
+    
+    songs = get_all_songs()
+    
+    for i, song in enumerate(songs, 1):
+        songs_tree.insert(
+            "", "end",
+            values=(
+                i,
+                song["title"],
+                song["artist_name"],
+                song["genre_name"] or "N/A",
+                song["duration_formatted"],
+                song["file_size_formatted"],
+                song["song_id"]
+            )
+        )
+    
+    song_stats_label.configure(text=f"Total Songs: {len(songs_tree.get_children())}")
+
+def confirm_delete_song():
+    """Confirm and delete selected song"""
+    selected = songs_tree.selection()
+    if not selected:
+        messagebox.showwarning("Warning", "Please select a song.")
+        return
+    
+    song_id = songs_tree.item(selected, 'values')[-1]
+    song_title = songs_tree.item(selected, 'values')[1]
+    
+    confirm = messagebox.askyesno(
+        "Confirm Delete",
+        f"Delete song '{song_title}'? This action is irreversible."
+    )
+    
+    if confirm:
+        if delete_song(song_id):
+            messagebox.showinfo("Success", f"Song '{song_title}' deleted.")
+            refresh_song_list()
+        else:
+            messagebox.showerror("Error", f"Failed to delete song '{song_title}'.")
+
+def handle_upload_song():
+    """Handle the song upload process"""
+    file_path = filedialog.askopenfilename(
+        title="Select Song",
+        filetypes=[("Audio Files", "*.mp3 *.wav *.flac"), ("All files", "*.*")]
+    )
+    
+    if not file_path:
+        return
+    
+    if not os.path.exists(file_path):
+        messagebox.showerror("Error", "File does not exist.")
+        return
+    
+    try:
+        with open(file_path, 'rb') as f:
+            f.read(1)
+    except Exception as e:
+        messagebox.showerror("Error", f"Cannot access file: {e}")
+        return
+    
+    default_title = os.path.splitext(os.path.basename(file_path))[0]
+    
+    dialog = ctk.CTkToplevel(root)
+    dialog.title("Upload Song")
+    dialog.geometry("450x600")
+    dialog.transient(root)
+    dialog.grab_set()
+    
+    dialog.update_idletasks()
+    width = dialog.winfo_width()
+    height = dialog.winfo_height()
+    x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+    y = (dialog.winfo_screenheight() // 2) - (height // 2)
+    dialog.geometry(f"{width}x{height}+{x}+{y}")
+    
+    ctk.CTkLabel(
+        dialog,
+        text="Upload Song",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["text"]
+    ).pack(pady=20)
+    
+    # Form fields
+    title_var = ctk.StringVar(value=default_title)
+    album_var = ctk.StringVar()
+    
+    # Title
+    title_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    title_frame.pack(fill="x", padx=20, pady=5)
+    ctk.CTkLabel(title_frame, text="Title:", font=("Inter", 12), width=100).pack(side="left")
+    ctk.CTkEntry(title_frame, textvariable=title_var, width=250, font=("Inter", 12)).pack(side="left")
+    
+    # Artist
+    artists = get_artists()
+    artist_names = [artist["name"] for artist in artists] or ["Unknown Artist"]
+    artist_ids = [artist["artist_id"] for artist in artists] or [1]
+    artist_var = ctk.StringVar(value=artist_names[0] if artist_names else "")
+    
+    artist_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    artist_frame.pack(fill="x", padx=20, pady=5)
+    ctk.CTkLabel(artist_frame, text="Artist:", font=("Inter", 12), width=100).pack(side="left")
+    artist_menu = ctk.CTkOptionMenu(
+        artist_frame,
+        variable=artist_var,
+        values=artist_names,
+        width=250,
+        font=("Inter", 12)
+    )
+    artist_menu.pack(side="left")
+    
+    def add_artist():
+        name = simpledialog.askstring("New Artist", "Enter artist name:")
+        if name and name.strip():
+            new_id = add_new_artist(name.strip())
+            if new_id:
+                artist_names.append(name)
+                artist_ids.append(new_id)
+                artist_menu.configure(values=artist_names)
+                artist_var.set(name)
+                messagebox.showinfo("Success", f"Artist '{name}' added.")
+    
+    ctk.CTkButton(
+        artist_frame,
+        text="+",
+        width=40,
+        font=("Inter", 12),
+        command=add_artist,
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"]
+    ).pack(side="left", padx=5)
+    
+    # Genre
+    genres = get_genres()
+    genre_names = [genre["name"] for genre in genres] or ["Unknown Genre"]
+    genre_ids = [genre["genre_id"] for genre in genres] or [1]
+    genre_var = ctk.StringVar(value=genre_names[0] if genre_names else "")
+    
+    genre_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    genre_frame.pack(fill="x", padx=20, pady=5)
+    ctk.CTkLabel(genre_frame, text="Genre:", font=("Inter", 12), width=100).pack(side="left")
+    genre_menu = ctk.CTkOptionMenu(
+        genre_frame,
+        variable=genre_var,
+        values=genre_names,
+        width=250,
+        font=("Inter", 12)
+    )
+    genre_menu.pack(side="left")
+    
+    def add_genre():
+        name = simpledialog.askstring("New Genre", "Enter genre name:")
+        if name and name.strip():
+            new_id = add_new_genre(name.strip())
+            if new_id:
+                genre_names.append(name)
+                genre_ids.append(new_id)
+                genre_menu.configure(values=genre_names)
+                genre_var.set(name)
+                messagebox.showinfo("Success", f"Genre '{name}' added.")
+    
+    ctk.CTkButton(
+        genre_frame,
+        text="+",
+        width=40,
+        font=("Inter", 12),
+        command=add_genre,
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"]
+    ).pack(side="left", padx=5)
+    
+    # Album
+    album_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    album_frame.pack(fill="x", padx=20, pady=5)
+    ctk.CTkLabel(album_frame, text="Album:", font=("Inter", 12), width=100).pack(side="left")
+    ctk.CTkEntry(album_frame, textvariable=album_var, width=250, font=("Inter", 12)).pack(side="left")
+    
+    # File info
+    file_size = os.path.getsize(file_path)
+    file_type = os.path.splitext(file_path)[1][1:].lower()
+    
+    file_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    file_frame.pack(fill="x", padx=20, pady=10)
+    ctk.CTkLabel(
+        file_frame,
+        text=f"File: {os.path.basename(file_path)}",
+        font=("Inter", 12),
+        text_color=COLORS["text"]
+    ).pack(anchor="w")
+    ctk.CTkLabel(
+        file_frame,
+        text=f"Type: {file_type.upper()} | Size: {format_file_size(file_size)}",
+        font=("Inter", 12),
+        text_color=COLORS["text_secondary"]
+    ).pack(anchor="w")
+    
+    def do_upload():
+        title = title_var.get().strip()
+        if not title:
+            messagebox.showwarning("Warning", "Please enter a title.")
+            return
+        
+        artist_name = artist_var.get()
+        if artist_name not in artist_names:
+            messagebox.showwarning("Warning", "Please select a valid artist.")
+            return
+        artist_id = artist_ids[artist_names.index(artist_name)]
+        
+        genre_name = genre_var.get()
+        if genre_name not in genre_names:
+            messagebox.showwarning("Warning", "Please select a valid genre.")
+            return
+        genre_id = genre_ids[genre_names.index(genre_name)]
+        
+        album_name = album_var.get().strip()
+        album_id = None
+        if album_name:
+            album_id = get_or_create_album(album_name, artist_id)
+            if not album_id:
+                messagebox.showerror("Error", "Failed to process album.")
+                return
+        
+        progress_label = ctk.CTkLabel(
+            dialog,
+            text="Uploading...",
+            font=("Inter", 12),
+            text_color=COLORS["text_secondary"]
+        )
+        progress_label.pack(pady=10)
+        dialog.config(cursor="wait")
+        dialog.update()
+        
+        song_id = upload_song(file_path, title, artist_id, genre_id, album_id)
+        
+        dialog.config(cursor="")
+        progress_label.destroy()
+        
+        if song_id:
+            messagebox.showinfo("Success", f"Song '{title}' uploaded.")
+            dialog.destroy()
+            refresh_song_list()
+        else:
+            messagebox.showerror("Error", "Failed to upload song.")
+    
+    ctk.CTkButton(
+        dialog,
+        text="Upload",
+        font=("Inter", 14),
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        command=do_upload,
+        height=40,
+        corner_radius=8
+    ).pack(pady=20)
+
+def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
+    """Upload a song to the database"""
+    try:
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", "File not found.")
+            return None
+        
+        file_size = os.path.getsize(file_path)
+        file_type = os.path.splitext(file_path)[1][1:].lower()
+        
+        if file_type not in ['mp3', 'wav', 'flac']:
+            messagebox.showerror("Error", f"Unsupported file type: {file_type}.")
+            return None
+        
+        duration = 180
+        try:
+            if file_type == 'mp3':
+                audio = MP3(file_path)
+                duration = int(audio.info.length)
+            elif file_type == 'flac':
+                audio = FLAC(file_path)
+                duration = int(audio.info.length)
+            elif file_type == 'wav':
+                audio = WAVE(file_path)
+                duration = int(audio.info.length)
+        except Exception as e:
+            print(f"Warning: Could not get duration: {e}")
+        
+        with open(file_path, 'rb') as file:
+            file_data = file.read()
+        
+        max_size = 100 * 1024 * 1024
+        if file_size > max_size:
+            messagebox.showerror("Error", f"File too large: {format_file_size(file_size)}.")
+            return None
+        
+        connection = connect_db()
+        if not connection:
+            return None
+            
+        cursor = connection.cursor()
+        
+        query = """
+        INSERT INTO Songs (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, upload_date)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        values = (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, datetime.datetime.now())
+        cursor.execute(query, values)
+        connection.commit()
+        
+        new_song_id = cursor.lastrowid
+        return new_song_id
+        
+    except mysql.connector.Error as e:
+        print(f"Database error: {e}")
+        messagebox.showerror("Error", f"Database error: {e}")
+        return None
+    except Exception as e:
+        print(f"Error: {e}")
+        messagebox.showerror("Error", f"Upload failed: {e}")
+        return None
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def generate_and_open_song_report():
+    """Generate a song report and open it"""
+    songs = get_all_songs()
+    
+    report_data = [
+        {
+            'Song ID': song['song_id'],
+            'Title': song['title'],
+            'Artist': song['artist_name'],
+            'Album': song.get('album_name', 'N/A'),
+            'Genre': song.get('genre_name', 'N/A'),
+            'Duration': song['duration_formatted'],
+            'File Type': song.get('file_type', 'N/A'),
+            'File Size': song['file_size_formatted'],
+            'Upload Date': song['upload_date'].strftime('%Y-%m-%d %H:%M:%S')
+        } for song in songs
+    ]
+    
+    filename = f"songs_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    report_path = generate_report("songs", report_data, filename)
+    
+    if report_path:
+        messagebox.showinfo("Success", f"Report saved to: {report_path}")
+        open_file(report_path)
+    else:
+        messagebox.showerror("Error", "Failed to generate report.")
+
+# ------------------- Artist and Genre Functions -------------------
+def get_artists():
+    """Get list of artists from the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT artist_id, name FROM Artists ORDER BY name")
+        return cursor.fetchall()
+        
+    except mysql.connector.Error as e:
+        print(f"Error fetching artists: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def add_new_artist(name):
+    """Add a new artist to the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return None
+            
+        cursor = connection.cursor()
+        
+        cursor.execute("SELECT artist_id FROM Artists WHERE name = %s", (name,))
+        existing = cursor.fetchone()
+        if existing:
+            return existing[0]
+            
+        cursor.execute("INSERT INTO Artists (name) VALUES (%s)", (name,))
+        connection.commit()
+        return cursor.lastrowid
+        
+    except mysql.connector.Error as e:
+        print(f"Error adding artist: {e}")
+        return None
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def get_genres():
+    """Get list of genres from the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT genre_id, name FROM Genres ORDER BY name")
+        return cursor.fetchall()
+        
+    except mysql.connector.Error as e:
+        print(f"Error fetching genres: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def add_new_genre(name):
+    """Add a new genre to the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return None
+            
+        cursor = connection.cursor()
+        
+        cursor.execute("SELECT genre_id FROM Genres WHERE name = %s", (name,))
+        existing = cursor.fetchone()
+        if existing:
+            return existing[0]
+            
+        cursor.execute("INSERT INTO Genres (name) VALUES (%s)", (name,))
+        connection.commit()
+        return cursor.lastrowid
+        
+    except mysql.connector.Error as e:
+        print(f"Error adding genre: {e}")
+        return None
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def get_or_create_album(album_name, artist_id):
+    """Get album ID or create a new album"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return None
+            
+        cursor = connection.cursor()
+        
+        cursor.execute(
+            "SELECT album_id FROM Albums WHERE title = %s AND artist_id = %s",
+            (album_name, artist_id)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            return existing[0]
+            
+        cursor.execute(
+            "INSERT INTO Albums (title, artist_id) VALUES (%s, %s)",
+            (album_name, artist_id)
+        )
+        connection.commit()
+        return cursor.lastrowid
+        
+    except mysql.connector.Error as e:
+        print(f"Error adding album: {e}")
+        return None
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+# ------------------- Reports UI Functions -------------------
+# Continuation from Reports UI Functions
+
+def create_reports_frame(parent_frame, admin):
+    """Create the modernized reports UI"""
+    main_frame = ctk.CTkFrame(parent_frame, fg_color=COLORS["content"], corner_radius=12)
+    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Header
+    header_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    header_frame.pack(fill="x", padx=20, pady=(20, 10))
+    
+    ctk.CTkLabel(
+        header_frame,
+        text="Reports & Analytics",
+        font=("Inter", 28, "bold"),
+        text_color=COLORS["text"]
+    ).pack(side="left")
+    
+    ctk.CTkLabel(
+        header_frame,
+        text=f"{admin['first_name']} {admin['last_name']}",
+        font=("Inter", 14),
+        text_color=COLORS["text_secondary"]
+    ).pack(side="right")
+    
+    ctk.CTkButton(
+        header_frame,
+        text="← Back",
+        font=("Inter", 12),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        command=show_dashboard_view,
+        width=120,
+        height=32,
+        corner_radius=8
+    ).pack(side="right", padx=10)
+    
+    # Reports section
+    reports_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
+    reports_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    ctk.CTkLabel(
+        reports_frame,
+        text="Available Reports",
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(anchor="w", padx=20, pady=(20, 10))
+    
+    # Report buttons grid
+    reports_grid = ctk.CTkFrame(reports_frame, fg_color="transparent")
+    reports_grid.pack(fill="x", padx=20, pady=10)
+    
+    report_buttons = [
+        ("Users Report", generate_and_open_user_report, COLORS["primary"]),
+        ("Songs Report", generate_and_open_song_report, COLORS["secondary"]),
+        #("Activity Report", generate_and_open_activity_report, COLORS["success"])
+    ]
+    
+    for i, (text, command, color) in enumerate(report_buttons):
+        btn = ctk.CTkButton(
+            reports_grid,
+            text=text,
+            command=command,
+            font=("Inter", 14),
+            fg_color=color,
+            #hover_color=COLORS[f"{color[1:]}_hover"] if color != COLORS["primary"] else COLORS["primary_hover"],
+            height=48,
+            corner_radius=8
+        )
+        btn.grid(row=i, column=0, padx=10, pady=10, sticky="ew")
+        reports_grid.grid_columnconfigure(0, weight=1)
+    
+    # Report history section
+    history_frame = ctk.CTkFrame(reports_frame, fg_color=COLORS["content"], corner_radius=8)
+    history_frame.pack(fill="x", padx=20, pady=20)
+    
+    ctk.CTkLabel(
+        history_frame,
+        text="Recent Reports",
+        font=("Inter", 16, "bold"),
+        text_color=COLORS["text"]
+    ).pack(anchor="w", padx=15, pady=(15, 5))
+    
+    try:
+        reports_dir = APP_CONFIG["reports_dir"]
+        report_files = sorted(
+            [f for f in os.listdir(reports_dir) if f.endswith('.csv')],
+            key=lambda x: os.path.getmtime(os.path.join(reports_dir, x)),
+            reverse=True
+        )[:5]
+        
+        if not report_files:
+            ctk.CTkLabel(
+                history_frame,
+                text="No reports generated yet",
+                font=("Inter", 14),
+                text_color=COLORS["text_secondary"]
+            ).pack(pady=20)
+        else:
+            for report in report_files:
+                report_item = ctk.CTkFrame(history_frame, fg_color=COLORS["card"], corner_radius=8)
+                report_item.pack(fill="x", pady=5)
+                
+                ctk.CTkLabel(
+                    report_item,
+                    text=report,
+                    font=("Inter", 14),
+                    text_color=COLORS["text"]
+                ).pack(side="left", padx=15, pady=10)
+                
+                ctk.CTkButton(
+                    report_item,
+                    text="Open",
+                    font=("Inter", 12),
+                    fg_color=COLORS["secondary"],
+                    hover_color=COLORS["secondary_hover"],
+                    command=lambda r=report: open_file(os.path.join(reports_dir, r)),
+                    width=80,
+                    height=28,
+                    corner_radius=8
+                ).pack(side="right", padx=15)
+                
+    except Exception as e:
+        print(f"Error listing reports: {e}")
+        ctk.CTkLabel(
+            history_frame,
+            text="Unable to load report history",
+            font=("Inter", 14),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=20)
+
+def generate_and_open_activity_report():
+    """Generate an activity report and open it"""
+    activities = get_recent_activities(limit=100)
+    
+    report_data = [
+        {
+            'Activity Type': activity[0],
+            'Item': activity[1],
+            'Time': activity[2]
+        } for activity in activities
+    ]
+    
+    filename = f"activity_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    report_path = generate_report("activity", report_data, filename)
+    
+    if report_path:
+        messagebox.showinfo("Success", f"Report saved to: {report_path}")
+        open_file(report_path)
+    else:
+        messagebox.showerror("Error", "Failed to generate report.")
+
+# ------------------- Main Application Setup -------------------
+def create_main_window():
+    """Create the main application window with modernized UI"""
+    global root, content_frame
+    
+    root = ctk.CTk()
+    root.title(f"{APP_CONFIG['name']} v{APP_CONFIG['version']}")
+    root.geometry("1200x700")
+    
+    # Center window
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    
+    # Main frame
+    main_frame = ctk.CTkFrame(root, fg_color=COLORS["background"])
+    main_frame.pack(fill="both", expand=True)
+    
+    # Sidebar
+    sidebar_frame = ctk.CTkFrame(
+        main_frame,
+        fg_color=COLORS["sidebar"],
+        width=250,
+        corner_radius=0
+    )
+    sidebar_frame.pack(side="left", fill="y")
+    sidebar_frame.pack_propagate(False)
+    
+    # Sidebar header
+    ctk.CTkLabel(
+        sidebar_frame,
+        text=APP_CONFIG["name"],
+        font=("Inter", 20, "bold"),
+        text_color=COLORS["primary"]
+    ).pack(pady=(30, 20), padx=20)
+    
+    # Navigation buttons
+    nav_buttons = [
+        ("🏠 Dashboard", show_dashboard_view, COLORS["primary"]),
+        ("👥 Users", show_users_view, COLORS["primary"]),
+        ("🎵 Songs", show_songs_view, COLORS["primary"]),
+        #("📁 Playlists", show_playlist_view, COLORS["primary"]),
+        ("📊 Reports", show_reports_view, COLORS["primary"])
+    ]
+    
+    for text, command, color in nav_buttons:
+        btn = ctk.CTkButton(
+            sidebar_frame,
+            text=text,
+            command=command,
+            font=("Inter", 14),
+            fg_color="transparent",
+            hover_color=COLORS["primary_hover"],
+            text_color=COLORS["text"],
+            anchor="w",
+            height=40,
+            corner_radius=8
+        )
+        btn.pack(fill="x", padx=10, pady=5)
+    
+    # Sidebar footer
+    ctk.CTkButton(
+        sidebar_frame,
+        text="🚪 Logout",
+        command=open_login_page,
+        font=("Inter", 14),
+        fg_color=COLORS["danger"],
+        hover_color=COLORS["danger_hover"],
+        height=40,
+        corner_radius=8
+    ).pack(side="bottom", fill="x", padx=10, pady=20)
+    
+    # Content frame
+    content_frame = ctk.CTkFrame(
+        main_frame,
+        fg_color=COLORS["background"],
+        corner_radius=0
+    )
+    content_frame.pack(side="left", fill="both", expand=True)
+    
+    # Verify admin and show dashboard
+    admin = get_admin_info()
+    if admin:
+        show_dashboard_view()
+    else:
+        root.destroy()
+        return
+    
+    root.mainloop()
+
+# ------------------- Entry Point -------------------
+if __name__ == "__main__":
+    ensure_directories_exist()
+    create_main_window()

@@ -1,0 +1,7 @@
+"Metric","Value","Description"
+"Total Users",8,"Total registered users in the system"
+"Active Users (Last 30 Days)",8,"Users with activity in the last 30 days"
+"Total Songs",16,"Total songs available in the system"
+"Total Playlists",6,"Total playlists created by users"
+"Total Plays",47,"Total song plays recorded"
+"Most Popular Genre","N/A","Genre with the most songs"
