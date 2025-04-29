@@ -111,49 +111,81 @@ def login_user(email_entry, password_entry):
             connection.close()
 
 def show_forgot_password_dialog():
-    """Show a dialog for resetting the password, styled like login/signup pages"""
+    """Show a dialog for resetting the password, styled like login/signup pages with improved responsiveness"""
     dialog = ctk.CTkToplevel()
     dialog.title("Reset Password")
-    dialog.geometry("700x600")
+    dialog.geometry("800x700")
     dialog.resizable(True, True)
-    dialog.minsize(600, 500)
+    dialog.minsize(700, 600)
+    
+    # Master frame to maintain proportions
+    master_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    master_frame.pack(fill="both", expand=True, padx=20, pady=20)
     
     # Main Frame with rounded corners
-    main_frame = ctk.CTkFrame(dialog, corner_radius=20)
-    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    main_frame = ctk.CTkFrame(master_frame, corner_radius=20)
+    main_frame.pack(fill="both", expand=True)
+    
+    # Configure grid for main_frame
+    main_frame.grid_columnconfigure(0, weight=2)  # Left side
+    main_frame.grid_columnconfigure(1, weight=3)  # Right side
+    main_frame.grid_rowconfigure(0, weight=1)
 
     # Left Side - Branding with purple color
-    left_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["primary"], width=350, corner_radius=20)
-    left_frame.pack(side="left", fill="y")
+    left_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["primary"], corner_radius=20)
+    left_frame.grid(row=0, column=0, sticky="nsew", padx=(5, 2), pady=5)
+    
+    # Make left_frame contents responsive
+    left_frame.grid_columnconfigure(0, weight=1)
+    left_frame.grid_rowconfigure(0, weight=1)
+    left_frame.grid_rowconfigure(1, weight=1)
+    left_frame.grid_rowconfigure(2, weight=1)
 
+    # Title container
+    title_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    title_frame.place(relx=0.5, rely=0.22, anchor="center", relwidth=0.8)
+    
     # Title on the left side
     ctk.CTkLabel(
-        left_frame, 
+        title_frame, 
         text="Online Music\nSystem",
         font=("Arial", 40, "bold"), 
-        text_color="white"
-    ).place(relx=0.5, rely=0.22, anchor="center")
+        text_color="white",
+        justify="center"
+    ).pack(fill="x")
 
+    # Description container
+    desc_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    desc_frame.place(relx=0.5, rely=0.45, anchor="center", relwidth=0.8)
+    
     # Description text below title
     ctk.CTkLabel(
-        left_frame, 
+        desc_frame, 
         text="Reset your password to\ncontinue enjoying unlimited\nad-free music.",
         font=("Arial", 16), 
         text_color="white", 
         justify="center"
-    ).place(relx=0.5, rely=0.40, anchor="center")
+    ).pack(fill="x")
 
+    # Music bird illustration container
+    icon_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    icon_frame.place(relx=0.5, rely=0.75, anchor="center")
+    
     # Add music bird illustration
     ctk.CTkLabel(
-        left_frame, 
+        icon_frame, 
         text="🎵🐦", 
         font=("Arial", 40), 
         text_color="white"
-    ).place(relx=0.5, rely=0.75, anchor="center")
-
-    # Right Side - Form
-    right_frame = ctk.CTkFrame(main_frame, fg_color="white", width=350)
-    right_frame.pack(side="right", fill="both", expand=True)
+    ).pack()
+    
+    # Right Side - Reset Password Form
+    right_frame = ctk.CTkFrame(main_frame, fg_color="white", corner_radius=20)
+    right_frame.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
+    
+    # Make right_frame responsive
+    right_frame.grid_columnconfigure(0, weight=1)
+    right_frame.grid_rowconfigure(0, weight=1)
 
     # Scrollable content container
     content_frame = ctk.CTkScrollableFrame(right_frame, fg_color="white")
@@ -175,16 +207,21 @@ def show_forgot_password_dialog():
         text_color="gray"
     ).pack(anchor="w", pady=(0, 30))
 
-    # Email Address
+    # Email container
+    email_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    email_container.pack(fill="x", pady=(0, 15))
+    
+    # Email Address label
     ctk.CTkLabel(
-        content_frame,
+        email_container,
         text="Email Address",
         font=("Arial", 16, "bold"),
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
     
-    email_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    email_frame.pack(fill="x", pady=(0, 20))
+    # Email entry with envelope icon
+    email_frame = ctk.CTkFrame(email_container, fg_color="transparent", height=50)
+    email_frame.pack(fill="x")
     
     email_entry = ctk.CTkEntry(
         email_frame,
@@ -205,17 +242,22 @@ def show_forgot_password_dialog():
         font=("Arial", 16),
         fg_color="transparent"
     ).pack(side="right", padx=(0, 10))
-
-    # Secret Key
+    
+    # Secret Key container
+    secret_key_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    secret_key_container.pack(fill="x", pady=(0, 15))
+    
+    # Secret Key label
     ctk.CTkLabel(
-        content_frame,
+        secret_key_container,
         text="Secret Key",
         font=("Arial", 16, "bold"),
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
     
-    secret_key_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    secret_key_frame.pack(fill="x", pady=(0, 20))
+    # Secret Key entry with key icon and toggle
+    secret_key_frame = ctk.CTkFrame(secret_key_container, fg_color="transparent", height=50)
+    secret_key_frame.pack(fill="x")
     
     secret_key_entry = ctk.CTkEntry(
         secret_key_frame,
@@ -244,6 +286,13 @@ def show_forgot_password_dialog():
     )
     secret_key_toggle.pack(side="right", padx=(5, 10))
     
+    ctk.CTkLabel(
+        secret_key_frame,
+        text="🔑",
+        font=("Arial", 16),
+        fg_color="transparent"
+    ).pack(side="right", padx=(0, 5))
+    
     def toggle_secret_key():
         if secret_key_entry.cget("show") == "*":
             secret_key_entry.configure(show="")
@@ -254,16 +303,21 @@ def show_forgot_password_dialog():
     
     secret_key_toggle.configure(command=toggle_secret_key)
     
-    # New Password
+    # New Password container
+    new_password_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    new_password_container.pack(fill="x", pady=(0, 15))
+    
+    # New Password label
     ctk.CTkLabel(
-        content_frame,
+        new_password_container,
         text="New Password",
         font=("Arial", 16, "bold"),
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
     
-    new_password_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    new_password_frame.pack(fill="x", pady=(0, 20))
+    # New Password entry with lock icon and toggle
+    new_password_frame = ctk.CTkFrame(new_password_container, fg_color="transparent", height=50)
+    new_password_frame.pack(fill="x")
     
     new_password_entry = ctk.CTkEntry(
         new_password_frame,
@@ -292,6 +346,13 @@ def show_forgot_password_dialog():
     )
     new_password_toggle.pack(side="right", padx=(5, 10))
     
+    ctk.CTkLabel(
+        new_password_frame,
+        text="🔒",
+        font=("Arial", 16),
+        fg_color="transparent"
+    ).pack(side="right", padx=(0, 5))
+    
     def toggle_new_password():
         if new_password_entry.cget("show") == "*":
             new_password_entry.configure(show="")
@@ -302,16 +363,43 @@ def show_forgot_password_dialog():
     
     new_password_toggle.configure(command=toggle_new_password)
     
-    # Confirm New Password
+    # Password Strength Indicator
+    strength_frame = ctk.CTkFrame(new_password_container, fg_color="transparent")
+    strength_frame.pack(fill="x")
+    
+    strength_label = ctk.CTkLabel(
+        strength_frame,
+        text="Password Strength: None",
+        font=("Arial", 12),
+        text_color="gray"
+    )
+    strength_label.pack(anchor="w")
+
+    def update_password_strength(event=None):
+        password = new_password_entry.get()
+        if not password:
+            strength_label.configure(text="Password Strength: None", text_color="gray")
+        else:
+            strength, color = get_password_strength(password)
+            strength_label.configure(text=f"Password Strength: {strength}", text_color=color)
+
+    new_password_entry.bind("<KeyRelease>", update_password_strength)
+    
+    # Confirm New Password container
+    confirm_password_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    confirm_password_container.pack(fill="x", pady=(0, 15))
+    
+    # Confirm New Password label
     ctk.CTkLabel(
-        content_frame,
+        confirm_password_container,
         text="Confirm New Password",
         font=("Arial", 16, "bold"),
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
     
-    confirm_password_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    confirm_password_frame.pack(fill="x", pady=(0, 20))
+    # Confirm New Password entry with lock icon and toggle
+    confirm_password_frame = ctk.CTkFrame(confirm_password_container, fg_color="transparent", height=50)
+    confirm_password_frame.pack(fill="x")
     
     confirm_password_entry = ctk.CTkEntry(
         confirm_password_frame,
@@ -340,6 +428,13 @@ def show_forgot_password_dialog():
     )
     confirm_password_toggle.pack(side="right", padx=(5, 10))
     
+    ctk.CTkLabel(
+        confirm_password_frame,
+        text="🔒",
+        font=("Arial", 16),
+        fg_color="transparent"
+    ).pack(side="right", padx=(0, 5))
+    
     def toggle_confirm_password():
         if confirm_password_entry.cget("show") == "*":
             confirm_password_entry.configure(show="")
@@ -350,9 +445,13 @@ def show_forgot_password_dialog():
     
     confirm_password_toggle.configure(command=toggle_confirm_password)
     
+    # Button container
+    button_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    button_container.pack(fill="x", pady=(20, 0))
+    
     # Reset Password Button
     reset_button = ctk.CTkButton(
-        content_frame,
+        button_container,
         text="Reset Password",
         font=("Arial", 16, "bold"),
         fg_color=COLORS["primary"],
@@ -362,7 +461,7 @@ def show_forgot_password_dialog():
         height=50,
         command=lambda: reset_password_action()
     )
-    reset_button.pack(fill="x", pady=(20, 10))
+    reset_button.pack(fill="x", pady=(0, 15))
     
     # Add arrow icon to the button
     ctk.CTkLabel(
@@ -405,7 +504,7 @@ def show_forgot_password_dialog():
 
     # Back to Login Button
     back_button = ctk.CTkButton(
-        content_frame,
+        button_container,
         text="← Back to Login",
         font=("Arial", 14),
         fg_color="transparent",
@@ -415,7 +514,7 @@ def show_forgot_password_dialog():
         height=40,
         command=dialog.destroy
     )
-    back_button.pack(anchor="w", pady=(10, 0))
+    back_button.pack(anchor="w", pady=(0, 10))
 
 # ------------------- Signup Functions -------------------
 def signup_user(fullname_entry, email_entry, password_entry, confirm_password_entry, secret_key_entry):
@@ -531,8 +630,8 @@ def open_main_page():
 
 # ------------------- UI Creation Functions -------------------
 def create_login_ui(parent_frame):
-    """Create the login UI elements"""
-    # Scrollable content frame
+    """Create the login UI elements with improved responsiveness"""
+    # Scrollable content frame with proper padding
     content_frame = ctk.CTkScrollableFrame(parent_frame, fg_color="white")
     content_frame.pack(fill="both", expand=True, padx=40, pady=40)
 
@@ -552,17 +651,21 @@ def create_login_ui(parent_frame):
         text_color="gray"
     ).pack(anchor="w", pady=(0, 30))
 
+    # Email Address container
+    email_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    email_container.pack(fill="x", pady=(0, 15))
+    
     # Email Address label
     ctk.CTkLabel(
-        content_frame, 
+        email_container, 
         text="Email Address", 
         font=("Arial", 16, "bold"), 
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
 
-    # Email entry with proper icon placement
-    email_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    email_frame.pack(fill="x", pady=(0, 20))
+    # Email entry with icon
+    email_frame = ctk.CTkFrame(email_container, fg_color="transparent", height=50)
+    email_frame.pack(fill="x")
     
     email_entry = ctk.CTkEntry(
         email_frame, 
@@ -577,6 +680,7 @@ def create_login_ui(parent_frame):
     )
     email_entry.pack(fill="x", side="left", expand=True)
     
+    # Email icon
     ctk.CTkLabel(
         email_frame, 
         text="✉️", 
@@ -584,17 +688,21 @@ def create_login_ui(parent_frame):
         fg_color="transparent"
     ).pack(side="right", padx=(0, 10))
 
+    # Password container
+    password_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    password_container.pack(fill="x", pady=(0, 15))
+    
     # Password label
     ctk.CTkLabel(
-        content_frame, 
+        password_container, 
         text="Password", 
         font=("Arial", 16, "bold"), 
         text_color="#333333"
     ).pack(anchor="w", pady=(0, 5))
 
-    # Password entry with proper icon placement
-    password_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    password_frame.pack(fill="x", pady=(0, 20))
+    # Password entry with icon
+    password_frame = ctk.CTkFrame(password_container, fg_color="transparent", height=50)
+    password_frame.pack(fill="x")
     
     password_entry = ctk.CTkEntry(
         password_frame, 
@@ -610,6 +718,7 @@ def create_login_ui(parent_frame):
     )
     password_entry.pack(fill="x", side="left", expand=True)
     
+    # Password toggle button
     password_toggle = ctk.CTkButton(
         password_frame,
         text="👁️",
@@ -623,6 +732,14 @@ def create_login_ui(parent_frame):
     )
     password_toggle.pack(side="right", padx=(5, 10))
     
+    # Lock icon
+    ctk.CTkLabel(
+        password_frame, 
+        text="🔒", 
+        font=("Arial", 16), 
+        fg_color="transparent"
+    ).pack(side="right", padx=(0, 5))
+    
     def toggle_password():
         if password_entry.cget("show") == "*":
             password_entry.configure(show="")
@@ -633,79 +750,75 @@ def create_login_ui(parent_frame):
     
     password_toggle.configure(command=toggle_password)
     
-    # Remember Me & Forgot Password row
-    remember_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    remember_frame.pack(fill="x", pady=(10, 20))
-
-    # Remember me checkbox
-    remember_var = ctk.BooleanVar()
-    ctk.CTkCheckBox(
-        remember_frame, 
-        text="Remember me", 
-        variable=remember_var, 
-        text_color="#333333", 
-        font=("Arial", 14),
-        fg_color=COLORS["primary"], 
-        border_color="#DDDDDD",
-        checkbox_height=20, 
-        checkbox_width=20
-    ).pack(side="left")
-
     # Forgot password link
-    forgot_pass = ctk.CTkLabel(
-        remember_frame, 
-        text="Forgot password?", 
-        font=("Arial", 14), 
+    forgot_frame = ctk.CTkFrame(password_container, fg_color="transparent")
+    forgot_frame.pack(fill="x")
+    
+    forgot_password = ctk.CTkLabel(
+        forgot_frame,
+        text="Forgot Password?",
+        font=("Arial", 12),
         text_color=COLORS["primary"],
         cursor="hand2"
     )
-    forgot_pass.pack(side="right")
-    forgot_pass.bind("<Button-1>", lambda e: show_forgot_password_dialog())
-
+    forgot_password.pack(anchor="e")
+    forgot_password.bind("<Button-1>", lambda e: show_forgot_password_dialog())
+    
+    # Login button container
+    button_container = ctk.CTkFrame(content_frame, fg_color="transparent")
+    button_container.pack(fill="x", pady=(20, 0))
+    
     # Login button
     login_button = ctk.CTkButton(
-        content_frame, 
-        text="Login", 
+        button_container,
+        text="Login",
         font=("Arial", 16, "bold"),
-        fg_color=COLORS["primary"], 
-        hover_color=COLORS["primary_hover"], 
-        text_color="white", 
-        corner_radius=10, 
-        height=50, 
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        text_color="white",
+        corner_radius=10,
+        height=50,
         command=lambda: login_user(email_entry, password_entry)
     )
-    login_button.pack(fill="x", pady=(0, 10))
+    login_button.pack(fill="x", pady=(0, 15))
     
     # Add arrow icon to the login button
     ctk.CTkLabel(
-        login_button, 
-        text="→", 
-        font=("Arial", 18, "bold"), 
+        login_button,
+        text="→",
+        font=("Arial", 18, "bold"),
         text_color="white"
     ).place(relx=0.9, rely=0.5, anchor="e")
-
-    # Signup button
-    signup_button = ctk.CTkButton(
-        content_frame, 
-        text="Create New Account", 
-        font=("Arial", 16, "bold"),
-        fg_color=COLORS["secondary"], 
-        hover_color=COLORS["secondary_hover"], 
-        text_color="white", 
-        corner_radius=10, 
-        height=50, 
-        command=show_signup_frame
+    
+    # Don't have an account section
+    signup_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+    signup_frame.pack(pady=(5, 10))
+    
+    ctk.CTkLabel(
+        signup_frame,
+        text="Don't have an account? ",
+        font=("Arial", 14),
+        text_color="#333333"
+    ).pack(side="left")
+    
+    signup_label = ctk.CTkLabel(
+        signup_frame,
+        text="Sign Up",
+        font=("Arial", 14, "bold"),
+        text_color=COLORS["primary"],
+        cursor="hand2"
     )
-    signup_button.pack(fill="x", pady=(10, 20))
-
+    signup_label.pack(side="left")
+    signup_label.bind("<Button-1>", lambda e: show_signup_frame())
+    
     # Back to main menu
-    back_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    back_frame.pack(pady=(10, 0))
+    back_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+    back_frame.pack(pady=(0, 10))
     
     back_label = ctk.CTkLabel(
-        back_frame, 
-        text="← Back to main menu", 
-        font=("Arial", 14), 
+        back_frame,
+        text="← Back to main menu",
+        font=("Arial", 14),
         text_color=COLORS["primary"],
         cursor="hand2"
     )
@@ -1047,7 +1160,7 @@ def create_signup_ui(parent_frame):
     return fullname_entry, email_entry, password_entry, confirm_password_entry, secret_key_entry
 
 def init_ui():
-    """Initialize the UI"""
+    """Initialize the UI with better responsiveness for all screen sizes"""
     global root, login_frame, signup_frame
     
     # Ensure temp directory exists
@@ -1057,66 +1170,98 @@ def init_ui():
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 
-    # Main window
+    # Main window with minimum size to ensure readability
     root = ctk.CTk()
     root.title("Online Music System - Login/Signup")
-    root.geometry("700x600")
-    root.minsize(600, 500)
+    root.geometry("900x700")  # Slightly larger default size
+    root.minsize(800, 600)    # Minimum size to ensure all content is visible
     root.resizable(True, True)
     
+    # Create a master frame that will maintain fixed proportions
+    master_frame = ctk.CTkFrame(root, fg_color="transparent")
+    master_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # Make master_frame responsive
+    master_frame.grid_columnconfigure(0, weight=1)
+    master_frame.grid_rowconfigure(0, weight=1)
+    
     # Main Frame with rounded corners
-    main_frame = ctk.CTkFrame(root, corner_radius=20)
-    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    main_frame = ctk.CTkFrame(master_frame, corner_radius=20)
+    main_frame.grid(row=0, column=0, sticky="nsew")
+    
+    # Configure column weights for main_frame
+    main_frame.grid_columnconfigure(0, weight=2)  # Left side (branding)
+    main_frame.grid_columnconfigure(1, weight=3)  # Right side (form)
+    main_frame.grid_rowconfigure(0, weight=1)
 
     # Left Side - Branding with purple color
-    left_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["primary"], width=350, corner_radius=20)
-    left_frame.pack(side="left", fill="y")
+    left_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["primary"], corner_radius=20)
+    left_frame.grid(row=0, column=0, sticky="nsew", padx=(5, 2), pady=5)
+    
+    # Make left_frame contents responsive
+    left_frame.grid_columnconfigure(0, weight=1)
+    left_frame.grid_rowconfigure(0, weight=1)
+    left_frame.grid_rowconfigure(1, weight=1)
+    left_frame.grid_rowconfigure(2, weight=1)
 
+    # Title container
+    title_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    title_frame.place(relx=0.5, rely=0.22, anchor="center", relwidth=0.8)
+    
     # Title on the left side
     ctk.CTkLabel(
-        left_frame, 
+        title_frame, 
         text="Online Music\nSystem",
         font=("Arial", 40, "bold"), 
-        text_color="white"
-    ).place(relx=0.5, rely=0.22, anchor="center")
+        text_color="white",
+        justify="center"
+    ).pack(fill="x")
 
+    # Description container
+    desc_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    desc_frame.place(relx=0.5, rely=0.45, anchor="center", relwidth=0.8)
+    
     # Description text below title
     ctk.CTkLabel(
-        left_frame, 
-        text="Enjoy unlimited *ad-free music*\nanytime, anywhere. Access premium\nplaylists and high-quality audio\nstreaming.",
+        desc_frame, 
+        text="Enjoy unlimited ad-free music\nanytime, anywhere. Access premium\nplaylists and high-quality audio\nstreaming.",
         font=("Arial", 16), 
         text_color="white", 
         justify="center"
-    ).place(relx=0.5, rely=0.40, anchor="center")
+    ).pack(fill="x")
 
+    # Music bird illustration container
+    icon_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+    icon_frame.place(relx=0.5, rely=0.75, anchor="center")
+    
     # Add music bird illustration
     ctk.CTkLabel(
-        left_frame, 
+        icon_frame, 
         text="🎵🐦", 
         font=("Arial", 40), 
         text_color="white"
-    ).place(relx=0.5, rely=0.75, anchor="center")
+    ).pack()
 
     # Right Side - Login/Signup Forms
-    right_frame = ctk.CTkFrame(main_frame, fg_color="white", width=350)
-    right_frame.pack(side="right", fill="both", expand=True)
+    right_frame = ctk.CTkFrame(main_frame, fg_color="white", corner_radius=20)
+    right_frame.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
+    
+    # Make right_frame responsive
+    right_frame.grid_columnconfigure(0, weight=1)
+    right_frame.grid_rowconfigure(0, weight=1)
 
     # Create login and signup frames
     login_frame = ctk.CTkFrame(right_frame, fg_color="white")
+    login_frame.grid(row=0, column=0, sticky="nsew")
+    
     signup_frame = ctk.CTkFrame(right_frame, fg_color="white")
-    
-    # Create content container with padding for both frames
-    login_content = ctk.CTkFrame(login_frame, fg_color="white")
-    login_content.pack(fill="both", expand=True)
-    
-    signup_content = ctk.CTkFrame(signup_frame, fg_color="white")
-    signup_content.pack(fill="both", expand=True)
+    signup_frame.grid(row=0, column=0, sticky="nsew")
     
     # Create login UI elements
-    email_entry, password_entry = create_login_ui(login_content)
+    email_entry, password_entry = create_login_ui(login_frame)
     
     # Create signup UI elements
-    fullname_entry, signup_email_entry, signup_password_entry, confirm_password_entry, secret_key_entry = create_signup_ui(signup_content)
+    fullname_entry, signup_email_entry, signup_password_entry, confirm_password_entry, secret_key_entry = create_signup_ui(signup_frame)
     
     # Set the appropriate frame to show on startup based on command line argument
     mode = "login"
@@ -1133,16 +1278,16 @@ def init_ui():
 def show_login_frame():
     """Show the login frame and hide the signup frame"""
     global login_frame, signup_frame
-    if signup_frame and signup_frame.winfo_ismapped():
-        signup_frame.pack_forget()
-    login_frame.pack(fill="both", expand=True)
+    if signup_frame and signup_frame.winfo_exists():
+        signup_frame.grid_remove()  # Use grid_remove instead of pack_forget
+    login_frame.grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
 
 def show_signup_frame():
     """Show the signup frame and hide the login frame"""
     global login_frame, signup_frame
-    if login_frame and login_frame.winfo_ismapped():
-        login_frame.pack_forget()
-    signup_frame.pack(fill="both", expand=True)
+    if login_frame and login_frame.winfo_exists():
+        login_frame.grid_remove()  # Use grid_remove instead of pack_forget
+    signup_frame.grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
 
 # ------------------- Main Entry Point -------------------
 if __name__ == "__main__":
