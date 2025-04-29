@@ -425,7 +425,7 @@ def toggle_admin_status(user_id, current_status):
             cursor.close()
             connection.close()
 
-def add_new_user(first_name, last_name, email, password, is_admin=0):
+def add_new_user(first_name, last_name, email, password, is_admin=0, is_active=1):
     """Add a new user to the database"""
     try:
         connection = connect_db()
@@ -442,8 +442,8 @@ def add_new_user(first_name, last_name, email, password, is_admin=0):
         hashed_password = hash_password(password)
         
         cursor.execute(
-            "INSERT INTO Users (first_name, last_name, email, password, is_admin) VALUES (%s, %s, %s, %s, %s)",
-            (first_name, last_name, email, hashed_password, is_admin)
+            "INSERT INTO Users (first_name, last_name, email, password, is_admin, is_active) VALUES (%s, %s, %s, %s, %s, %s)",
+            (first_name, last_name, email, hashed_password, is_admin, is_active)
         )
         
         new_user_id = cursor.lastrowid
@@ -550,7 +550,7 @@ def open_login_page():
         if os.path.exists("current_admin.txt"):
             os.remove("current_admin.txt")
             
-        subprocess.Popen(["python", "login.py"])
+        subprocess.Popen(["python", "main.py"])
         root.destroy()
     except Exception as e:
         messagebox.showerror("Error", f"Unable to logout: {e}")
@@ -710,56 +710,50 @@ def create_dashboard_frame(parent_frame, admin):
             download_count_label = label
     
     # Actions section
-    actions_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
-    actions_frame.pack(fill="x", padx=20, pady=20)
-    
-    ctk.CTkLabel(
-        actions_frame,
-        text="Quick Actions",
-        font=("Inter", 20, "bold"),
-        text_color=COLORS["primary"]
-    ).pack(anchor="w", padx=20, pady=(20, 10))
-    
-    actions_grid = ctk.CTkFrame(actions_frame, fg_color="transparent")
-    actions_grid.pack(fill="x", padx=20, pady=10)
-    
-    action_buttons = [
-        ("Manage Users", show_users_view, COLORS["primary"]),
-        ("Manage Songs", show_songs_view, COLORS["secondary"]),
-        #("Manage Playlists", show_playlist_view, COLORS["success"])
-    ]
-    
-    for i, (text, command, color) in enumerate(action_buttons):
-        btn = ctk.CTkButton(
-            actions_grid,
-            text=text,
-            command=command,
-            font=("Inter", 14),
-            fg_color=color,
-            #hover_color=COLORS[f"{color[1:]}_hover"] if color != COLORS["primary"] else COLORS["primary_hover"],
-            height=48,
-            corner_radius=8
-        )
-        btn.grid(row=0, column=i, padx=10, pady=10, sticky="ew")
-        actions_grid.grid_columnconfigure(i, weight=1)
-    
-    # Recent activity section
+    # Recent activity section with improved UI and scrollability
     activity_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["card"], corner_radius=12)
     activity_frame.pack(fill="both", expand=True, padx=20, pady=20)
-    
+
+    activity_header = ctk.CTkFrame(activity_frame, fg_color="transparent")
+    activity_header.pack(fill="x", padx=20, pady=(20, 10))
+
     ctk.CTkLabel(
-        activity_frame,
+        activity_header,
         text="Recent Activity",
         font=("Inter", 20, "bold"),
         text_color=COLORS["primary"]
-    ).pack(anchor="w", padx=20, pady=(20, 10))
-    
+    ).pack(side="left")
+
+    refresh_btn = ctk.CTkButton(
+        activity_header,
+        text="↻ Refresh",
+        font=("Inter", 12),
+        fg_color=COLORS["secondary"],
+        hover_color=COLORS["secondary_hover"],
+        command=refresh_dashboard,
+        width=80,
+        height=28,
+        corner_radius=8
+    )
+    refresh_btn.pack(side="right")
+
+    # Create a scrollable container for activities
     global activity_doc_frame
-    activity_doc_frame = ctk.CTkFrame(activity_frame, fg_color="transparent")
-    activity_doc_frame.pack(fill="both", expand=True, padx=20, pady=10)
-    
-    activities = get_recent_activities()
-    
+    activity_container = ctk.CTkFrame(activity_frame, fg_color="transparent")
+    activity_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+    # Make the activity frame scrollable
+    activity_scroll = ctk.CTkScrollableFrame(
+        activity_container, 
+        fg_color=COLORS["content"],
+        corner_radius=8,
+        height=250  # Fixed height for better appearance
+    )
+    activity_scroll.pack(fill="both", expand=True)
+    activity_doc_frame = activity_scroll
+
+    activities = get_recent_activities(15)  # Increase limit to show more activities
+
     if not activities:
         ctk.CTkLabel(
             activity_doc_frame,
@@ -769,29 +763,72 @@ def create_dashboard_frame(parent_frame, admin):
         ).pack(pady=20)
     else:
         for action, item, time in activities:
-            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["content"], corner_radius=8)
-            activity_item.pack(fill="x", pady=5)
+            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["card"], corner_radius=8)
+            activity_item.pack(fill="x", pady=5, padx=5, ipady=5)
             
-            ctk.CTkLabel(
-                activity_item,
-                text=action,
+            # Left side container for icon and action type
+            left_container = ctk.CTkFrame(activity_item, fg_color="transparent")
+            left_container.pack(side="left", padx=10, fill="y")
+            
+            # Draw a colored icon/badge based on activity type
+            color = COLORS["primary"]
+            if "New user" in action:
+                color = COLORS["success"]
+            elif "New song" in action:
+                color = COLORS["secondary"]
+            elif "New playlist" in action:
+                color = COLORS["warning"]
+            elif "Song played" in action:
+                color = COLORS["danger"]
+                
+            icon_label = ctk.CTkLabel(
+                left_container,
+                text=action.split()[0],  # Just the icon part
                 font=("Inter", 14, "bold"),
-                text_color=COLORS["text"]
-            ).pack(side="left", padx=15, pady=10)
+                text_color="white",
+                fg_color=color,
+                corner_radius=6,
+                width=30,
+                height=30
+            )
+            icon_label.pack(anchor="center", pady=2)
             
+            # Middle container for activity details
+            middle_container = ctk.CTkFrame(activity_item, fg_color="transparent")
+            middle_container.pack(side="left", fill="both", expand=True, padx=5)
+            
+            activity_type = " ".join(action.split()[1:])  # The action without the icon
+            
+            # Activity type label
             ctk.CTkLabel(
-                activity_item,
+                middle_container,
+                text=activity_type,
+                font=("Inter", 14, "bold"),
+                text_color=COLORS["text"],
+                anchor="w"
+            ).pack(anchor="w", pady=(2, 0))
+            
+            # Item label with ellipsis for long text
+            if len(item) > 40:
+                item = item[:37] + "..."
+                
+            ctk.CTkLabel(
+                middle_container,
                 text=item,
-                font=("Inter", 14),
-                text_color=COLORS["text_secondary"]
-            ).pack(side="left", padx=10)
+                font=("Inter", 12),
+                text_color=COLORS["text_secondary"],
+                anchor="w"
+            ).pack(anchor="w")
             
-            ctk.CTkLabel(
+            # Right container for time
+            time_label = ctk.CTkLabel(
                 activity_item,
                 text=time,
-                font=("Inter", 14),
-                text_color=COLORS["primary"]
-            ).pack(side="right", padx=15)
+                font=("Inter", 12),
+                text_color=COLORS["primary"],
+                width=80  # Fixed width for alignment
+            )
+            time_label.pack(side="right", padx=10)
 
 def refresh_dashboard():
     """Refresh the dashboard data"""
@@ -805,7 +842,7 @@ def refresh_dashboard():
     for widget in activity_doc_frame.winfo_children():
         widget.destroy()
     
-    activities = get_recent_activities()
+    activities = get_recent_activities(15)  # Increased limit
     
     if not activities:
         ctk.CTkLabel(
@@ -816,29 +853,72 @@ def refresh_dashboard():
         ).pack(pady=20)
     else:
         for action, item, time in activities:
-            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["content"], corner_radius=8)
-            activity_item.pack(fill="x", pady=5)
+            activity_item = ctk.CTkFrame(activity_doc_frame, fg_color=COLORS["card"], corner_radius=8)
+            activity_item.pack(fill="x", pady=5, padx=5, ipady=5)
             
-            ctk.CTkLabel(
-                activity_item,
-                text=action,
+            # Left side container for icon and action type
+            left_container = ctk.CTkFrame(activity_item, fg_color="transparent")
+            left_container.pack(side="left", padx=10, fill="y")
+            
+            # Draw a colored icon/badge based on activity type
+            color = COLORS["primary"]
+            if "New user" in action:
+                color = COLORS["success"]
+            elif "New song" in action:
+                color = COLORS["secondary"]
+            elif "New playlist" in action:
+                color = COLORS["warning"]
+            elif "Song played" in action:
+                color = COLORS["danger"]
+                
+            icon_label = ctk.CTkLabel(
+                left_container,
+                text=action.split()[0],  # Just the icon part
                 font=("Inter", 14, "bold"),
-                text_color=COLORS["text"]
-            ).pack(side="left", padx=15, pady=10)
+                text_color="white",
+                fg_color=color,
+                corner_radius=6,
+                width=30,
+                height=30
+            )
+            icon_label.pack(anchor="center", pady=2)
             
+            # Middle container for activity details
+            middle_container = ctk.CTkFrame(activity_item, fg_color="transparent")
+            middle_container.pack(side="left", fill="both", expand=True, padx=5)
+            
+            activity_type = " ".join(action.split()[1:])  # The action without the icon
+            
+            # Activity type label
             ctk.CTkLabel(
-                activity_item,
+                middle_container,
+                text=activity_type,
+                font=("Inter", 14, "bold"),
+                text_color=COLORS["text"],
+                anchor="w"
+            ).pack(anchor="w", pady=(2, 0))
+            
+            # Item label with ellipsis for long text
+            if len(item) > 40:
+                item = item[:37] + "..."
+                
+            ctk.CTkLabel(
+                middle_container,
                 text=item,
-                font=("Inter", 14),
-                text_color=COLORS["text_secondary"]
-            ).pack(side="left", padx=10)
+                font=("Inter", 12),
+                text_color=COLORS["text_secondary"],
+                anchor="w"
+            ).pack(anchor="w")
             
-            ctk.CTkLabel(
+            # Right container for time
+            time_label = ctk.CTkLabel(
                 activity_item,
                 text=time,
-                font=("Inter", 14),
-                text_color=COLORS["primary"]
-            ).pack(side="right", padx=15)
+                font=("Inter", 12),
+                text_color=COLORS["primary"],
+                width=80  # Fixed width for alignment
+            )
+            time_label.pack(side="right", padx=10)
 
 # ------------------- User Management UI Functions -------------------
 def create_users_frame(parent_frame, admin):
@@ -953,35 +1033,38 @@ def create_users_frame(parent_frame, admin):
     tree_scroll = ttk.Scrollbar(table_frame)
     tree_scroll.pack(side="right", fill="y")
     
+# Users table
     global users_tree
     users_tree = ttk.Treeview(
         table_frame,
-        columns=("id", "name", "email", "admin", "created", "playlists", "history", "user_id"),
+        columns=("id", "name", "email", "admin", "status", "created", "playlists", "history", "user_id"),
         show="headings",
         yscrollcommand=tree_scroll.set
     )
     users_tree.pack(fill="both", expand=True, padx=10, pady=10)
-    
+
     tree_scroll.config(command=users_tree.yview)
-    
+
     users_tree.heading("id", text="#")
     users_tree.heading("name", text="Name")
     users_tree.heading("email", text="Email")
     users_tree.heading("admin", text="Admin")
+    users_tree.heading("status", text="Status")
     users_tree.heading("created", text="Created")
     users_tree.heading("playlists", text="Playlists")
     users_tree.heading("history", text="Plays")
     users_tree.heading("user_id", text="ID")
-    
+
     users_tree.column("id", width=50, anchor="center")
     users_tree.column("name", width=200, anchor="w")
     users_tree.column("email", width=250, anchor="w")
     users_tree.column("admin", width=80, anchor="center")
+    users_tree.column("status", width=80, anchor="center")
     users_tree.column("created", width=120, anchor="center")
     users_tree.column("playlists", width=80, anchor="center")
     users_tree.column("history", width=80, anchor="center")
     users_tree.column("user_id", width=80, anchor="center")
-    
+        
     # Footer
     footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
     footer_frame.pack(fill="x", padx=20, pady=(0, 20))
@@ -994,6 +1077,17 @@ def create_users_frame(parent_frame, admin):
         text_color=COLORS["text_secondary"]
     )
     stats_label.pack(side="left")
+    # Add this after the Admin button
+    ctk.CTkButton(
+        actions_frame,
+        text="🔄 Status",
+        font=("Inter", 14),
+        fg_color=COLORS["success"],
+        hover_color=COLORS["success_hover"],
+        command=toggle_selected_active_status,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
     
     ctk.CTkButton(
         footer_frame,
@@ -1017,6 +1111,7 @@ def refresh_user_list():
     
     for i, user in enumerate(users, 1):
         admin_status = "Yes" if user["is_admin"] else "No"
+        active_status = "Active" if user["is_active"] else "Inactive"
         created_date = user["created_at"].strftime("%Y-%m-%d")
         users_tree.insert(
             "", "end",
@@ -1025,6 +1120,7 @@ def refresh_user_list():
                 f"{user['first_name']} {user['last_name']}",
                 user["email"],
                 admin_status,
+                active_status,
                 created_date,
                 user["playlist_count"],
                 user["listening_count"],
@@ -1606,20 +1702,31 @@ def handle_upload_song():
         dialog.config(cursor="wait")
         dialog.update()
         
-        song_id = upload_song(file_path, title, artist_id, genre_id, album_id)
-        
-        dialog.config(cursor="")
-        progress_label.destroy()
-        
-        if song_id:
-            messagebox.showinfo("Success", f"Song '{title}' uploaded.")
-            dialog.destroy()
-            refresh_song_list()
-        else:
-            messagebox.showerror("Error", "Failed to upload song.")
+        try:
+            song_id = upload_song(file_path, title, artist_id, genre_id, album_id)
+            
+            if song_id:
+                messagebox.showinfo("Success", f"Song '{title}' uploaded.")
+                dialog.destroy()
+                refresh_song_list()
+            else:
+                # The upload_song function already shows error messages
+                dialog.config(cursor="")
+                progress_label.destroy()
+                dialog.update()
+        except Exception as e:
+            messagebox.showerror("Error", f"Upload failed: {e}")
+            dialog.config(cursor="")
+            progress_label.destroy()
+            dialog.update()
     
+    # Button frame for better organization
+    button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    button_frame.pack(fill="x", padx=20, pady=20)
+    
+    # Upload button
     ctk.CTkButton(
-        dialog,
+        button_frame,
         text="Upload",
         font=("Inter", 14),
         fg_color=COLORS["primary"],
@@ -1627,10 +1734,22 @@ def handle_upload_song():
         command=do_upload,
         height=40,
         corner_radius=8
-    ).pack(pady=20)
+    ).pack(fill="x", pady=(0, 10))
+    
+    # Cancel button
+    ctk.CTkButton(
+        button_frame,
+        text="Cancel",
+        font=("Inter", 14),
+        fg_color=COLORS["danger"],
+        hover_color=COLORS["danger_hover"],
+        command=dialog.destroy,
+        height=40,
+        corner_radius=8
+    ).pack(fill="x")
 
 def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
-    """Upload a song to the database"""
+    """Upload a song to the database with duplicate detection"""
     try:
         if not os.path.exists(file_path):
             messagebox.showerror("Error", "File not found.")
@@ -1643,6 +1762,42 @@ def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
             messagebox.showerror("Error", f"Unsupported file type: {file_type}.")
             return None
         
+        # First database connection - just for checking duplicates
+        duplicate_exists = False
+        duplicate_title = ""
+        
+        # Use a separate try-except block for the duplicate check
+        try:
+            check_conn = connect_db()
+            if check_conn:
+                check_cursor = check_conn.cursor(dictionary=True)
+                check_cursor.execute(
+                    "SELECT song_id, title FROM Songs WHERE title = %s AND artist_id = %s",
+                    (title, artist_id)
+                )
+                existing_song = check_cursor.fetchone()
+                
+                if existing_song:
+                    duplicate_exists = True
+                    duplicate_title = existing_song["title"]
+                
+                check_cursor.close()
+                check_conn.close()
+        except mysql.connector.Error as e:
+            print(f"Error checking for duplicates: {e}")
+            # Continue with upload even if duplicate check fails
+        
+        # If duplicate found, ask for confirmation
+        if duplicate_exists:
+            confirm = messagebox.askyesno(
+                "Duplicate Song",
+                f"A song with title '{duplicate_title}' by this artist already exists. Upload anyway?",
+                icon='warning'
+            )
+            if not confirm:
+                return None
+                
+        # Process audio file
         duration = 180
         try:
             if file_type == 'mp3':
@@ -1657,6 +1812,7 @@ def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
         except Exception as e:
             print(f"Warning: Could not get duration: {e}")
         
+        # Read file data
         with open(file_path, 'rb') as file:
             file_data = file.read()
         
@@ -1665,23 +1821,32 @@ def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
             messagebox.showerror("Error", f"File too large: {format_file_size(file_size)}.")
             return None
         
-        connection = connect_db()
-        if not connection:
+        # Second database connection - just for inserting the song
+        insert_conn = connect_db()
+        if not insert_conn:
             return None
             
-        cursor = connection.cursor()
-        
-        query = """
-        INSERT INTO Songs (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, upload_date)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        
-        values = (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, datetime.datetime.now())
-        cursor.execute(query, values)
-        connection.commit()
-        
-        new_song_id = cursor.lastrowid
-        return new_song_id
+        try:
+            insert_cursor = insert_conn.cursor()
+            
+            query = """
+            INSERT INTO Songs (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, upload_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            values = (title, artist_id, genre_id, album_id, duration, file_data, file_type, file_size, datetime.datetime.now())
+            insert_cursor.execute(query, values)
+            insert_conn.commit()
+            
+            new_song_id = insert_cursor.lastrowid
+            insert_cursor.close()
+            insert_conn.close()
+            
+            return new_song_id
+        except mysql.connector.Error as e:
+            if insert_conn:
+                insert_conn.close()
+            raise e
         
     except mysql.connector.Error as e:
         print(f"Database error: {e}")
@@ -1691,10 +1856,34 @@ def upload_song(file_path, title, artist_id, genre_id=None, album_id=None):
         print(f"Error: {e}")
         messagebox.showerror("Error", f"Upload failed: {e}")
         return None
-    finally:
-        if 'connection' in locals() and connection.is_connected():
-            cursor.close()
-            connection.close()
+
+def generate_and_open_user_report():
+    """Generate a user report and open it"""
+    users = get_all_users()
+    
+    report_data = [
+        {
+            'User ID': user['user_id'],
+            'First Name': user['first_name'],
+            'Last Name': user['last_name'],
+            'Email': user['email'],
+            'Admin': 'Yes' if user['is_admin'] else 'No',
+            'Created At': user['created_at'].strftime('%Y-%m-%d %H:%M:%S'),
+            'Playlists': user['playlist_count'],
+            'Plays': user['listening_count']
+        } for user in users
+    ]
+    
+    # Updated filename format
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"report-{timestamp}-users.csv"
+    report_path = generate_report("users", report_data, filename)
+    
+    if report_path:
+        messagebox.showinfo("Success", f"Report saved to: {report_path}")
+        open_file(report_path)
+    else:
+        messagebox.showerror("Error", "Failed to generate report.")
 
 def generate_and_open_song_report():
     """Generate a song report and open it"""
@@ -1714,8 +1903,32 @@ def generate_and_open_song_report():
         } for song in songs
     ]
     
-    filename = f"songs_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Updated filename format
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"report-{timestamp}-songs.csv"
     report_path = generate_report("songs", report_data, filename)
+    
+    if report_path:
+        messagebox.showinfo("Success", f"Report saved to: {report_path}")
+        open_file(report_path)
+    else:
+        messagebox.showerror("Error", "Failed to generate report.")
+def generate_and_open_activity_report():
+    """Generate an activity report and open it"""
+    activities = get_recent_activities(limit=100)
+    
+    report_data = [
+        {
+            'Activity Type': activity[0],
+            'Item': activity[1],
+            'Time': activity[2]
+        } for activity in activities
+    ]
+    
+    # Updated filename format
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"report-{timestamp}-activity.csv"
+    report_path = generate_report("activity", report_data, filename)
     
     if report_path:
         messagebox.showinfo("Success", f"Report saved to: {report_path}")
@@ -1998,6 +2211,87 @@ def generate_and_open_activity_report():
         open_file(report_path)
     else:
         messagebox.showerror("Error", "Failed to generate report.")
+def toggle_active_status(user_id, current_status):
+    """Toggle user's active status"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        new_status = 0 if current_status else 1
+        
+        cursor.execute(
+            "UPDATE Users SET is_active = %s WHERE user_id = %s",
+            (new_status, user_id)
+        )
+        connection.commit()
+        return True
+        
+    except mysql.connector.Error as e:
+        print(f"Error updating active status: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+def toggle_selected_active_status():
+    """Toggle active status for selected user"""
+    selected = users_tree.selection()
+    if not selected:
+        messagebox.showwarning("Warning", "Please select a user.")
+        return
+    
+    user_id = users_tree.item(selected, 'values')[-1]
+    user_name = users_tree.item(selected, 'values')[1]
+    current_status = users_tree.item(selected, 'values')[4] == "Active"
+    
+    action = "deactivate" if current_status else "activate"
+    confirm = messagebox.askyesno(
+        "Confirm",
+        f"Do you want to {action} user '{user_name}'?"
+    )
+    
+    if confirm:
+        if toggle_active_status(user_id, current_status):
+            status = "deactivated" if current_status else "activated"
+            messagebox.showinfo("Success", f"User '{user_name}' has been {status}.")
+            refresh_user_list()
+        else:
+            messagebox.showerror("Error", f"Failed to {action} user '{user_name}'.")
+def get_all_users():
+    """Get all users from the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+        SELECT u.user_id, u.first_name, u.last_name, u.email, u.is_admin, u.is_active, u.created_at,
+               COUNT(DISTINCT p.playlist_id) as playlist_count,
+               COUNT(DISTINCT lh.history_id) as listening_count
+        FROM Users u
+        LEFT JOIN Playlists p ON u.user_id = p.user_id
+        LEFT JOIN Listening_History lh ON u.user_id = lh.user_id
+        GROUP BY u.user_id
+        ORDER BY u.created_at DESC
+        """
+        
+        cursor.execute(query)
+        users = cursor.fetchall()
+        
+        return users
+        
+    except mysql.connector.Error as e:
+        print(f"Error fetching users: {e}")
+        messagebox.showerror("Error", f"Failed to fetch users: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
 
 # ------------------- Main Application Setup -------------------
 def create_main_window():

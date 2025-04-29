@@ -200,7 +200,7 @@ def record_listening_history(song_id):
             connection.close()
 
 def search_songs(query, search_type="all"):
-    """Search for songs in the database"""
+    """Search for songs in the database with preference for albums"""
     try:
         if not query:
             return []
@@ -212,6 +212,20 @@ def search_songs(query, search_type="all"):
         cursor = connection.cursor(dictionary=True)
         
         search_param = f"%{query}%"
+        
+        # First check if there are any albums matching the query
+        if search_type == "all":
+            album_check_query = """
+            SELECT COUNT(*) as album_count
+            FROM Albums al
+            WHERE al.title LIKE %s
+            """
+            cursor.execute(album_check_query, (search_param,))
+            album_count = cursor.fetchone()['album_count']
+            
+            # If albums are found, switch search type to album
+            if album_count > 0:
+                search_type = "album"
         
         if search_type == "song":
             query = """
@@ -252,7 +266,7 @@ def search_songs(query, search_type="all"):
             """
             cursor.execute(query, (search_param,))
             
-        else:  # "all"
+        else:  # "all" without album matches
             query = """
             SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
                    g.name as genre, s.duration

@@ -33,6 +33,12 @@ def create_database():
         
         # Create Users table
         print("Creating Users table...")
+        # Create Users table
+        print("Creating Users table...")
+        cursor.execute("""
+        ALTER TABLE Users ADD COLUMN is_active BOOLEAN DEFAULT TRUE,
+        )
+        """)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Users (
             user_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,6 +47,7 @@ def create_database():
             email VARCHAR(100) NOT NULL UNIQUE,
             password VARCHAR(64) NOT NULL,
             is_admin BOOLEAN DEFAULT FALSE,
+            is_active BOOLEAN DEFAULT TRUE,  # New field, default to active
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)

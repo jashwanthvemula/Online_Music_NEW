@@ -88,11 +88,9 @@ def show_forgot_password_dialog():
         text_color="#333333"
     ).pack(anchor="w", padx=20, pady=(10, 5))
     
-    email_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-    email_frame.pack(fill="x", padx=20, pady=(0, 15))
-    
+    # Email entry with icon in placeholder
     email_entry = ctk.CTkEntry(
-        email_frame,
+        dialog,
         font=("Arial", 12),
         height=45,
         corner_radius=8,
@@ -100,16 +98,9 @@ def show_forgot_password_dialog():
         border_color="#DDDDDD",
         fg_color="white",
         text_color="black",
-        placeholder_text="Enter your email"
+        placeholder_text="✉️ Enter your email"
     )
-    email_entry.pack(fill="x", side="left", expand=True)
-    
-    ctk.CTkLabel(
-        email_frame,
-        text="✉️",
-        font=("Arial", 14),
-        fg_color="transparent"
-    ).pack(side="right", padx=(0, 10))
+    email_entry.pack(fill="x", padx=20, pady=(0, 15))
     
     # Secret Key
     ctk.CTkLabel(
@@ -119,6 +110,7 @@ def show_forgot_password_dialog():
         text_color="#333333"
     ).pack(anchor="w", padx=20, pady=(0, 5))
     
+    # Secret Key entry with frame for toggle button
     secret_key_frame = ctk.CTkFrame(dialog, fg_color="transparent")
     secret_key_frame.pack(fill="x", padx=20, pady=(0, 15))
     
@@ -131,17 +123,36 @@ def show_forgot_password_dialog():
         border_color="#DDDDDD",
         fg_color="white",
         text_color="black",
-        placeholder_text="Enter your secret key",
+        placeholder_text="🔑 Enter your secret key",
         show="*"
     )
     secret_key_entry.pack(fill="x", side="left", expand=True)
     
-    ctk.CTkLabel(
+    # Secret key toggle button
+    secret_key_toggle = ctk.CTkButton(
         secret_key_frame,
-        text="🔑",
+        text="👁️",
         font=("Arial", 14),
-        fg_color="transparent"
-    ).pack(side="right", padx=(0, 10))
+        width=30,
+        height=30,
+        corner_radius=8,
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        text_color="white"
+    )
+    secret_key_toggle.place(relx=0.95, rely=0.5, anchor="e")
+    
+    # Define toggle function
+    def toggle_secret_key():
+        if secret_key_entry.cget("show") == "*":
+            secret_key_entry.configure(show="")
+            secret_key_toggle.configure(text="🙈")
+        else:
+            secret_key_entry.configure(show="*")
+            secret_key_toggle.configure(text="👁️")
+    
+    # Assign command to toggle button
+    secret_key_toggle.configure(command=toggle_secret_key)
     
     # New Password
     ctk.CTkLabel(
@@ -151,6 +162,7 @@ def show_forgot_password_dialog():
         text_color="#333333"
     ).pack(anchor="w", padx=20, pady=(0, 5))
     
+    # New Password entry with frame for toggle button
     new_password_frame = ctk.CTkFrame(dialog, fg_color="transparent")
     new_password_frame.pack(fill="x", padx=20, pady=(0, 15))
     
@@ -163,17 +175,36 @@ def show_forgot_password_dialog():
         border_color="#DDDDDD",
         fg_color="white",
         text_color="black",
-        placeholder_text="Enter new password",
+        placeholder_text="🔒 Enter new password",
         show="*"
     )
     new_password_entry.pack(fill="x", side="left", expand=True)
     
-    ctk.CTkLabel(
+    # New password toggle button
+    new_password_toggle = ctk.CTkButton(
         new_password_frame,
-        text="🔒",
+        text="👁️",
         font=("Arial", 14),
-        fg_color="transparent"
-    ).pack(side="right", padx=(0, 10))
+        width=30,
+        height=30,
+        corner_radius=8,
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        text_color="white"
+    )
+    new_password_toggle.place(relx=0.95, rely=0.5, anchor="e")
+    
+    # Define toggle function
+    def toggle_new_password():
+        if new_password_entry.cget("show") == "*":
+            new_password_entry.configure(show="")
+            new_password_toggle.configure(text="🙈")
+        else:
+            new_password_entry.configure(show="*")
+            new_password_toggle.configure(text="👁️")
+    
+    # Assign command to toggle button
+    new_password_toggle.configure(command=toggle_new_password)
     
     # Confirm New Password
     ctk.CTkLabel(
@@ -183,6 +214,7 @@ def show_forgot_password_dialog():
         text_color="#333333"
     ).pack(anchor="w", padx=20, pady=(0, 5))
     
+    # Confirm New Password entry with frame for toggle button
     confirm_password_frame = ctk.CTkFrame(dialog, fg_color="transparent")
     confirm_password_frame.pack(fill="x", padx=20, pady=(0, 15))
     
@@ -195,17 +227,36 @@ def show_forgot_password_dialog():
         border_color="#DDDDDD",
         fg_color="white",
         text_color="black",
-        placeholder_text="Confirm new password",
+        placeholder_text="🔒 Confirm new password",
         show="*"
     )
     confirm_password_entry.pack(fill="x", side="left", expand=True)
     
-    ctk.CTkLabel(
+    # Confirm password toggle button
+    confirm_password_toggle = ctk.CTkButton(
         confirm_password_frame,
-        text="🔒",
+        text="👁️",
         font=("Arial", 14),
-        fg_color="transparent"
-    ).pack(side="right", padx=(0, 10))
+        width=30,
+        height=30,
+        corner_radius=8,
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        text_color="white"
+    )
+    confirm_password_toggle.place(relx=0.95, rely=0.5, anchor="e")
+    
+    # Define toggle function
+    def toggle_confirm_password():
+        if confirm_password_entry.cget("show") == "*":
+            confirm_password_entry.configure(show="")
+            confirm_password_toggle.configure(text="🙈")
+        else:
+            confirm_password_entry.configure(show="*")
+            confirm_password_toggle.configure(text="👁️")
+    
+    # Assign command to toggle button
+    confirm_password_toggle.configure(command=toggle_confirm_password)
     
     def reset_password_action():
         email = email_entry.get()
@@ -239,7 +290,7 @@ def show_forgot_password_dialog():
             messagebox.showerror("Error", "Invalid email or secret key.")
     
     # Reset Password Button
-    ctk.CTkButton(
+    reset_button = ctk.CTkButton(
         dialog,
         text="Reset Password",
         font=("Arial", 14, "bold"),
@@ -249,15 +300,16 @@ def show_forgot_password_dialog():
         corner_radius=8,
         height=45,
         command=reset_password_action
-    ).pack(fill="x", padx=20, pady=20)
+    )
+    reset_button.pack(fill="x", padx=20, pady=20)
     
     # Add arrow icon to the button
     ctk.CTkLabel(
-        dialog,
+        reset_button,
         text="→",
         font=("Arial", 16, "bold"),
         text_color="white"
-    ).place(relx=0.85, rely=0.85, anchor="e")
+    ).place(relx=0.9, rely=0.5, anchor="e")
 
 def open_admin_dashboard():
     """Open the admin dashboard after successful login"""
@@ -340,41 +392,66 @@ try:
                               font=("Arial", 14, "bold"), text_color="#333333")
     email_label.pack(anchor="w", pady=(0, 5))
 
-    # Email entry with proper icon placement
-    email_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-    email_frame.pack(fill="x", pady=(0, 15))
-    
+    # Email entry with icon in placeholder
     global email_entry
-    email_entry = ctk.CTkEntry(email_frame, font=("Arial", 12), 
-                              height=45, corner_radius=8,
-                              border_width=1, border_color="#DDDDDD",
-                              fg_color="white", text_color="black",
-                              placeholder_text="admin@music.com")
-    email_entry.pack(fill="x", side="left", expand=True)
-    
-    email_icon = ctk.CTkLabel(email_frame, text="✉️", font=("Arial", 14), fg_color="transparent")
-    email_icon.pack(side="right", padx=(0, 10))
+    email_entry = ctk.CTkEntry(content_frame, 
+                              font=("Arial", 12), 
+                              height=45, 
+                              corner_radius=8,
+                              border_width=1, 
+                              border_color="#DDDDDD",
+                              fg_color="white", 
+                              text_color="black",
+                              placeholder_text="✉️ admin@music.com")
+    email_entry.pack(fill="x", pady=(0, 15))
 
     # Password label
     password_label = ctk.CTkLabel(content_frame, text="Password", 
                                  font=("Arial", 14, "bold"), text_color="#333333")
     password_label.pack(anchor="w", pady=(5, 5))
 
-    # Password entry with proper icon placement
+    # Password entry with frame for toggle button
     password_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
     password_frame.pack(fill="x", pady=(0, 15))
     
     global password_entry
-    password_entry = ctk.CTkEntry(password_frame, font=("Arial", 12), 
-                                 height=45, corner_radius=8, 
-                                 border_width=1, border_color="#DDDDDD",
-                                 fg_color="white", text_color="black", 
+    password_entry = ctk.CTkEntry(password_frame, 
+                                 font=("Arial", 12), 
+                                 height=45, 
+                                 corner_radius=8, 
+                                 border_width=1, 
+                                 border_color="#DDDDDD",
+                                 fg_color="white", 
+                                 text_color="black", 
                                  show="*",
-                                 placeholder_text="admin123")
+                                 placeholder_text="🔒 admin123")
     password_entry.pack(fill="x", side="left", expand=True)
     
-    password_icon = ctk.CTkLabel(password_frame, text="🔒", font=("Arial", 14), fg_color="transparent")
-    password_icon.pack(side="right", padx=(0, 10))
+    # Password toggle button
+    password_toggle = ctk.CTkButton(
+        password_frame,
+        text="👁️",
+        font=("Arial", 14),
+        width=30,
+        height=30,
+        corner_radius=8,
+        fg_color=COLORS["primary"],
+        hover_color=COLORS["primary_hover"],
+        text_color="white"
+    )
+    password_toggle.place(relx=0.95, rely=0.5, anchor="e")
+    
+    # Define toggle function
+    def toggle_password():
+        if password_entry.cget("show") == "*":
+            password_entry.configure(show="")
+            password_toggle.configure(text="🙈")
+        else:
+            password_entry.configure(show="*")
+            password_toggle.configure(text="👁️")
+    
+    # Assign command to toggle button
+    password_toggle.configure(command=toggle_password)
 
     # Forgot Password link
     forgot_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
