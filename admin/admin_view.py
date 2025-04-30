@@ -476,7 +476,7 @@ def get_all_songs():
         
         query = """
         SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name,
-               g.name as genre_name, s.duration, s.file_size, s.file_type, s.upload_date
+               g.name as genre_name, s.duration, s.is_active, s.file_size, s.file_type, s.upload_date
         FROM Songs s
         JOIN Artists a ON s.artist_id = a.artist_id
         LEFT JOIN Albums al ON s.album_id = al.album_id
@@ -491,6 +491,7 @@ def get_all_songs():
             minutes, seconds = divmod(song['duration'] or 0, 60)
             song['duration_formatted'] = f"{minutes}:{seconds:02d}"
             song['file_size_formatted'] = format_file_size(song['file_size'])
+            song['status'] = "Active" if song['is_active'] else "Inactive"
         
         return songs
         
@@ -499,7 +500,7 @@ def get_all_songs():
         messagebox.showerror("Error", f"Failed to fetch songs: {e}")
         return []
     finally:
-        if 'connection' in locals() and connection.is_connected():
+        if 'connection' in locals() and connection and connection.is_connected():
             cursor.close()
             connection.close()
 def delete_song(song_id):
@@ -1101,6 +1102,57 @@ def create_users_frame(parent_frame, admin):
     ).pack(side="right")
     
     refresh_user_list()
+def toggle_song_active_status(song_id, current_status):
+    """Toggle song's active status"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return False
+            
+        cursor = connection.cursor()
+        new_status = 0 if current_status else 1
+        
+        cursor.execute(
+            "UPDATE Songs SET is_active = %s WHERE song_id = %s",
+            (new_status, song_id)
+        )
+        connection.commit()
+        return True
+        
+    except mysql.connector.Error as e:
+        print(f"Error updating song active status: {e}")
+        return False
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def toggle_selected_song_status():
+    """Toggle active status for the selected song"""
+    selected = songs_tree.selection()
+    if not selected:
+        messagebox.showwarning("Warning", "Please select a song.")
+        return
+    
+    song_id = songs_tree.item(selected, 'values')[-1]
+    song_title = songs_tree.item(selected, 'values')[1]
+    # Get current status from the tree - we need to add this column to the tree first
+    current_status = songs_tree.item(selected, 'values')[6] == "Active" 
+    
+    action = "deactivate" if current_status else "activate"
+    confirm = messagebox.askyesno(
+        "Confirm",
+        f"Do you want to {action} song '{song_title}'?\n\n"
+        f"{'Users will NOT see this song anymore.' if current_status else 'Users will be able to see this song.'}"
+    )
+    
+    if confirm:
+        if toggle_song_active_status(song_id, current_status):
+            status = "deactivated" if current_status else "activated"
+            messagebox.showinfo("Success", f"Song '{song_title}' has been {status}.")
+            refresh_song_list()
+        else:
+            messagebox.showerror("Error", f"Failed to {action} song '{song_title}'.")
 
 def refresh_user_list():
     """Refresh the user list display"""
@@ -1370,7 +1422,19 @@ def create_songs_frame(parent_frame, admin):
         command=confirm_delete_song,
         height=40,
         corner_radius=8
-    ).pack(side="left")
+    ).pack(side="left", padx=(0, 10))
+    
+    # New button for toggling song active status
+    ctk.CTkButton(
+        actions_frame,
+        text="🔄 Toggle Status",
+        font=("Inter", 14),
+        fg_color=COLORS["warning"],
+        hover_color=COLORS["warning_hover"],
+        command=toggle_selected_song_status,
+        height=40,
+        corner_radius=8
+    ).pack(side="left", padx=(0, 10))
     
     ctk.CTkButton(
         actions_frame,
@@ -1415,7 +1479,7 @@ def create_songs_frame(parent_frame, admin):
     global songs_tree
     songs_tree = ttk.Treeview(
         table_frame,
-        columns=("id", "title", "artist", "genre", "duration", "size", "song_id"),
+        columns=("id", "title", "artist", "genre", "duration", "size", "status", "song_id"),
         show="headings",
         yscrollcommand=tree_scroll.set
     )
@@ -1429,14 +1493,16 @@ def create_songs_frame(parent_frame, admin):
     songs_tree.heading("genre", text="Genre")
     songs_tree.heading("duration", text="Duration")
     songs_tree.heading("size", text="Size")
+    songs_tree.heading("status", text="Status")
     songs_tree.heading("song_id", text="ID")
     
     songs_tree.column("id", width=50, anchor="center")
     songs_tree.column("title", width=250, anchor="w")
-    songs_tree.column("artist", width=200, anchor="w")
+    songs_tree.column("artist", width=180, anchor="w")
     songs_tree.column("genre", width=120, anchor="w")
     songs_tree.column("duration", width=80, anchor="center")
     songs_tree.column("size", width=100, anchor="e")
+    songs_tree.column("status", width=80, anchor="center")
     songs_tree.column("song_id", width=80, anchor="center")
     
     # Footer
@@ -1471,8 +1537,15 @@ def refresh_song_list():
         songs_tree.delete(item)
     
     songs = get_all_songs()
+    active_count = 0
+    inactive_count = 0
     
     for i, song in enumerate(songs, 1):
+        if song.get('is_active', 1):
+            active_count += 1
+        else:
+            inactive_count += 1
+            
         songs_tree.insert(
             "", "end",
             values=(
@@ -1482,11 +1555,12 @@ def refresh_song_list():
                 song["genre_name"] or "N/A",
                 song["duration_formatted"],
                 song["file_size_formatted"],
+                song["status"],
                 song["song_id"]
             )
         )
     
-    song_stats_label.configure(text=f"Total Songs: {len(songs_tree.get_children())}")
+    song_stats_label.configure(text=f"Total Songs: {len(songs)} (Active: {active_count}, Inactive: {inactive_count})")
 
 def confirm_delete_song():
     """Confirm and delete selected song"""

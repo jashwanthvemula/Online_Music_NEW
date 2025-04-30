@@ -70,6 +70,7 @@ queue_index = -1
 queue_context = None
 
 # ------------------- Data Functions -------------------
+# Modify the get_featured_songs function
 def get_featured_songs(limit=3):
     """Get featured songs from the database"""
     try:
@@ -84,6 +85,7 @@ def get_featured_songs(limit=3):
         FROM Songs s
         JOIN Artists a ON s.artist_id = a.artist_id
         LEFT JOIN Listening_History lh ON s.song_id = lh.song_id
+        WHERE s.is_active = 1  # Only show active songs
         GROUP BY s.song_id
         ORDER BY play_count DESC
         LIMIT %s
@@ -97,6 +99,7 @@ def get_featured_songs(limit=3):
             SELECT s.song_id, s.title, a.name as artist_name 
             FROM Songs s
             JOIN Artists a ON s.artist_id = a.artist_id
+            WHERE s.is_active = 1  # Only show active songs
             ORDER BY s.upload_date DESC
             LIMIT %s
             """
@@ -107,6 +110,235 @@ def get_featured_songs(limit=3):
         
     except Exception as e:
         print(f"Error fetching featured songs: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+# Modify the search_songs function
+def search_songs(query, search_type="all"):
+    """Search for songs in the database with preference for albums"""
+    try:
+        if not query:
+            return []
+            
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        search_param = f"%{query}%"
+        
+        # First check if there are any albums matching the query
+        if search_type == "all":
+            album_check_query = """
+            SELECT COUNT(*) as album_count
+            FROM Albums al
+            JOIN Songs s ON s.album_id = al.album_id
+            WHERE al.title LIKE %s AND s.is_active = 1  # Only count albums with active songs
+            """
+            cursor.execute(album_check_query, (search_param,))
+            album_count = cursor.fetchone()['album_count']
+            
+            # If albums are found, switch search type to album
+            if album_count > 0:
+                search_type = "album"
+        
+        if search_type == "song":
+            query = """
+            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
+                   g.name as genre, s.duration
+            FROM Songs s
+            JOIN Artists a ON s.artist_id = a.artist_id
+            LEFT JOIN Albums al ON s.album_id = al.album_id
+            LEFT JOIN Genres g ON s.genre_id = g.genre_id
+            WHERE s.title LIKE %s AND s.is_active = 1  # Only show active songs
+            ORDER BY s.title
+            """
+            cursor.execute(query, (search_param,))
+        
+        elif search_type == "artist":
+            query = """
+            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
+                   g.name as genre, s.duration
+            FROM Songs s
+            JOIN Artists a ON s.artist_id = a.artist_id
+            LEFT JOIN Albums al ON s.album_id = al.album_id
+            LEFT JOIN Genres g ON s.genre_id = g.genre_id
+            WHERE a.name LIKE %s AND s.is_active = 1  # Only show active songs
+            ORDER BY a.name, s.title
+            """
+            cursor.execute(query, (search_param,))
+            
+        elif search_type == "album":
+            query = """
+            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
+                   g.name as genre, s.duration
+            FROM Songs s
+            JOIN Artists a ON s.artist_id = a.artist_id
+            LEFT JOIN Albums al ON s.album_id = al.album_id
+            LEFT JOIN Genres g ON s.genre_id = g.genre_id
+            WHERE al.title LIKE %s AND s.is_active = 1  # Only show active songs
+            ORDER BY al.title, s.title
+            """
+            cursor.execute(query, (search_param,))
+            
+        else:  # "all" without album matches
+            query = """
+            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
+                   g.name as genre, s.duration
+            FROM Songs s
+            JOIN Artists a ON s.artist_id = a.artist_id
+            LEFT JOIN Albums al ON s.album_id = al.album_id
+            LEFT JOIN Genres g ON s.genre_id = g.genre_id
+            WHERE (s.title LIKE %s OR a.name LIKE %s OR al.title LIKE %s) AND s.is_active = 1  # Only show active songs
+            ORDER BY s.title
+            """
+            cursor.execute(query, (search_param, search_param, search_param))
+        
+        songs = cursor.fetchall()
+        
+        for song in songs:
+            minutes, seconds = divmod(song['duration'] or 0, 60)
+            song['duration_formatted'] = f"{minutes}:{seconds:02d}"
+        
+        return songs
+        
+    except Exception as e:
+        print(f"Error searching songs: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+
+# Modify the get_user_favorite_songs function
+def get_user_favorite_songs(limit=8):
+    """Get the current user's favorite songs"""
+    try:
+        with open("current_user.txt", "r") as f:
+            user_id = f.read().strip()
+            
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+        SELECT s.song_id, s.title, a.name as artist_name, COUNT(lh.history_id) as play_count,
+               g.name as genre_name, s.file_size, s.file_type
+        FROM Listening_History lh
+        JOIN Songs s ON lh.song_id = s.song_id
+        JOIN Artists a ON s.artist_id = a.artist_id
+        LEFT JOIN Genres g ON s.genre_id = g.genre_id
+        WHERE lh.user_id = %s AND s.is_active = 1  # Only show active songs
+        GROUP BY s.song_id
+        ORDER BY play_count DESC
+        LIMIT %s
+        """
+        
+        cursor.execute(query, (user_id, limit))
+        songs = cursor.fetchall()
+        
+        for song in songs:
+            song['file_size_formatted'] = format_file_size(song['file_size'])
+            
+        return songs
+        
+    except Exception as e:
+        print(f"Error getting user favorite songs: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+# Modify the get_popular_songs function
+
+# Modify the get_random_songs function
+def get_random_songs(limit=8, exclude_ids=None):
+    """Get random songs from the database"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        exclusion_filter = "WHERE s.is_active = 1"  # Always filter for active songs
+        params = []
+        
+        if exclude_ids and len(exclude_ids) > 0:
+            placeholders = ", ".join(["%s"] * len(exclude_ids))
+            exclusion_filter = f"WHERE s.is_active = 1 AND s.song_id NOT IN ({placeholders})"
+            params = exclude_ids
+        
+        query = f"""
+        SELECT s.song_id, s.title, a.name as artist_name, g.name as genre_name
+        FROM Songs s
+        JOIN Artists a ON s.artist_id = a.artist_id
+        LEFT JOIN Genres g ON s.genre_id = g.genre_id
+        {exclusion_filter}
+        ORDER BY RAND()
+        LIMIT %s
+        """
+        
+        params.append(limit)
+        cursor.execute(query, params)
+        songs = cursor.fetchall()
+        
+        if not songs:
+            songs = [
+                {"song_id": 1, "title": "Blinding Lights", "artist_name": "The Weeknd", "genre_name": "Pop"},
+                {"song_id": 2, "title": "Levitating", "artist_name": "Dua Lipa", "genre_name": "Pop"},
+                {"song_id": 3, "title": "Believer", "artist_name": "Imagine Dragons", "genre_name": "Rock"},
+                {"song_id": 4, "title": "Shape of You", "artist_name": "Ed Sheeran", "genre_name": "Pop"}
+            ]
+            random.shuffle(songs)
+            songs = songs[:limit]
+        
+        return songs
+        
+    except Exception as e:
+        print(f"Error getting random songs: {e}")
+        return []
+    finally:
+        if 'connection' in locals() and connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+# Modify the get_playlist_songs function
+def get_playlist_songs(playlist_id):
+    """Get all songs in a specific playlist"""
+    try:
+        connection = connect_db()
+        if not connection:
+            return []
+            
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+        SELECT s.song_id, s.title, a.name as artist_name, g.name as genre_name
+        FROM Playlist_Songs ps
+        JOIN Songs s ON ps.song_id = s.song_id
+        JOIN Artists a ON s.artist_id = a.artist_id
+        LEFT JOIN Genres g ON s.genre_id = g.genre_id
+        WHERE ps.playlist_id = %s AND s.is_active = 1  # Only show active songs
+        ORDER BY ps.position
+        """
+        
+        cursor.execute(query, (playlist_id,))
+        songs = cursor.fetchall()
+        
+        return songs
+        
+    except Exception as e:
+        print(f"Error fetching playlist songs: {e}")
         return []
     finally:
         if 'connection' in locals() and connection and connection.is_connected():
@@ -199,142 +431,9 @@ def record_listening_history(song_id):
             cursor.close()
             connection.close()
 
-def search_songs(query, search_type="all"):
-    """Search for songs in the database with preference for albums"""
-    try:
-        if not query:
-            return []
-            
-        connection = connect_db()
-        if not connection:
-            return []
-            
-        cursor = connection.cursor(dictionary=True)
-        
-        search_param = f"%{query}%"
-        
-        # First check if there are any albums matching the query
-        if search_type == "all":
-            album_check_query = """
-            SELECT COUNT(*) as album_count
-            FROM Albums al
-            WHERE al.title LIKE %s
-            """
-            cursor.execute(album_check_query, (search_param,))
-            album_count = cursor.fetchone()['album_count']
-            
-            # If albums are found, switch search type to album
-            if album_count > 0:
-                search_type = "album"
-        
-        if search_type == "song":
-            query = """
-            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
-                   g.name as genre, s.duration
-            FROM Songs s
-            JOIN Artists a ON s.artist_id = a.artist_id
-            LEFT JOIN Albums al ON s.album_id = al.album_id
-            LEFT JOIN Genres g ON s.genre_id = g.genre_id
-            WHERE s.title LIKE %s
-            ORDER BY s.title
-            """
-            cursor.execute(query, (search_param,))
-        
-        elif search_type == "artist":
-            query = """
-            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
-                   g.name as genre, s.duration
-            FROM Songs s
-            JOIN Artists a ON s.artist_id = a.artist_id
-            LEFT JOIN Albums al ON s.album_id = al.album_id
-            LEFT JOIN Genres g ON s.genre_id = g.genre_id
-            WHERE a.name LIKE %s
-            ORDER BY a.name, s.title
-            """
-            cursor.execute(query, (search_param,))
-            
-        elif search_type == "album":
-            query = """
-            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
-                   g.name as genre, s.duration
-            FROM Songs s
-            JOIN Artists a ON s.artist_id = a.artist_id
-            LEFT JOIN Albums al ON s.album_id = al.album_id
-            LEFT JOIN Genres g ON s.genre_id = g.genre_id
-            WHERE al.title LIKE %s
-            ORDER BY al.title, s.title
-            """
-            cursor.execute(query, (search_param,))
-            
-        else:  # "all" without album matches
-            query = """
-            SELECT s.song_id, s.title, a.name as artist_name, al.title as album_name, 
-                   g.name as genre, s.duration
-            FROM Songs s
-            JOIN Artists a ON s.artist_id = a.artist_id
-            LEFT JOIN Albums al ON s.album_id = al.album_id
-            LEFT JOIN Genres g ON s.genre_id = g.genre_id
-            WHERE s.title LIKE %s OR a.name LIKE %s OR al.title LIKE %s
-            ORDER BY s.title
-            """
-            cursor.execute(query, (search_param, search_param, search_param))
-        
-        songs = cursor.fetchall()
-        
-        for song in songs:
-            minutes, seconds = divmod(song['duration'] or 0, 60)
-            song['duration_formatted'] = f"{minutes}:{seconds:02d}"
-        
-        return songs
-        
-    except Exception as e:
-        print(f"Error searching songs: {e}")
-        return []
-    finally:
-        if 'connection' in locals() and connection and connection.is_connected():
-            cursor.close()
-            connection.close()
 
-def get_user_favorite_songs(limit=8):
-    """Get the current user's favorite songs"""
-    try:
-        with open("current_user.txt", "r") as f:
-            user_id = f.read().strip()
-            
-        connection = connect_db()
-        if not connection:
-            return []
-            
-        cursor = connection.cursor(dictionary=True)
-        
-        query = """
-        SELECT s.song_id, s.title, a.name as artist_name, COUNT(lh.history_id) as play_count,
-               g.name as genre_name, s.file_size, s.file_type
-        FROM Listening_History lh
-        JOIN Songs s ON lh.song_id = s.song_id
-        JOIN Artists a ON s.artist_id = a.artist_id
-        LEFT JOIN Genres g ON s.genre_id = g.genre_id
-        WHERE lh.user_id = %s
-        GROUP BY s.song_id
-        ORDER BY play_count DESC
-        LIMIT %s
-        """
-        
-        cursor.execute(query, (user_id, limit))
-        songs = cursor.fetchall()
-        
-        for song in songs:
-            song['file_size_formatted'] = format_file_size(song['file_size'])
-            
-        return songs
-        
-    except Exception as e:
-        print(f"Error getting user favorite songs: {e}")
-        return []
-    finally:
-        if 'connection' in locals() and connection and connection.is_connected():
-            cursor.close()
-            connection.close()
+
+
 
 def get_popular_songs(limit=8):
     """Get most popular songs from the database"""
@@ -352,6 +451,7 @@ def get_popular_songs(limit=8):
         JOIN Artists a ON s.artist_id = a.artist_id
         LEFT JOIN Genres g ON s.genre_id = g.genre_id
         LEFT JOIN Listening_History lh ON s.song_id = lh.song_id
+        WHERE s.is_active = 1  # Only show active songs
         GROUP BY s.song_id
         ORDER BY play_count DESC
         LIMIT %s
@@ -367,6 +467,7 @@ def get_popular_songs(limit=8):
             FROM Songs s
             JOIN Artists a ON s.artist_id = a.artist_id
             LEFT JOIN Genres g ON s.genre_id = g.genre_id
+            WHERE s.is_active = 1  # Only show active songs
             ORDER BY s.upload_date DESC
             LIMIT %s
             """
@@ -549,12 +650,12 @@ def get_random_songs(limit=8, exclude_ids=None):
             
         cursor = connection.cursor(dictionary=True)
         
-        exclusion_filter = ""
+        exclusion_filter = "WHERE s.is_active = 1"  # Always filter for active songs
         params = []
         
         if exclude_ids and len(exclude_ids) > 0:
             placeholders = ", ".join(["%s"] * len(exclude_ids))
-            exclusion_filter = f"WHERE s.song_id NOT IN ({placeholders})"
+            exclusion_filter = f"WHERE s.is_active = 1 AND s.song_id NOT IN ({placeholders})"
             params = exclude_ids
         
         query = f"""
@@ -664,7 +765,7 @@ def get_playlist_songs(playlist_id):
         JOIN Songs s ON ps.song_id = s.song_id
         JOIN Artists a ON s.artist_id = a.artist_id
         LEFT JOIN Genres g ON s.genre_id = g.genre_id
-        WHERE ps.playlist_id = %s
+        WHERE ps.playlist_id = %s AND s.is_active = 1  # Only show active songs
         ORDER BY ps.position
         """
         
@@ -1597,8 +1698,6 @@ def create_download_frame(parent_frame, user):
             return
         download_song(selected_song["id"])
     
-    def handle_upload_song():
-        messagebox.showinfo("Upload Song", "This functionality will be implemented in a future update.")
     
     ctk.CTkButton(
         button_frame,
@@ -1612,17 +1711,7 @@ def create_download_frame(parent_frame, user):
         command=download_selected_song
     ).pack(side="left", padx=10)
     
-    ctk.CTkButton(
-        button_frame,
-        text="⬆️ Upload New Song",
-        font=("Inter", 14, "bold"),
-        fg_color=COLORS["secondary"],
-        hover_color=COLORS["secondary_hover"],
-        corner_radius=8,
-        height=40,
-        width=210,
-        command=handle_upload_song
-    ).pack(side="left", padx=10)
+
 
 def create_recommend_frame(parent_frame, user):
     """Create the recommendations page UI"""

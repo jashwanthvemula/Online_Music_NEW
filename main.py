@@ -38,7 +38,11 @@ def create_database():
         cursor.execute("""
         ALTER TABLE Users ADD COLUMN is_active BOOLEAN DEFAULT TRUE,
         )
+        """)        
+        cursor.execute("""
+                ALTER TABLE Songs ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1,)
         """)
+
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Users (
             user_id INT AUTO_INCREMENT PRIMARY KEY,
