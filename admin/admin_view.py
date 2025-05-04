@@ -1351,8 +1351,8 @@ def generate_and_open_user_report():
             'Plays': user['listening_count']
         } for user in users
     ]
-    
-    filename = f"users_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    timestamp= datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"admin_user_{timestamp}.csv"
     report_path = generate_report("users", report_data, filename)
     
     if report_path:
@@ -1978,7 +1978,7 @@ def generate_and_open_song_report():
     
     # Updated filename format
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"report-{timestamp}-songs.csv"
+    filename = f"admin-songs-{timestamp}.csv"
     report_path = generate_report("songs", report_data, filename)
     
     if report_path:
@@ -2275,8 +2275,8 @@ def generate_and_open_activity_report():
             'Time': activity[2]
         } for activity in activities
     ]
-    
-    filename = f"activity_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"admin_activity_{timestamp}.csv"
     report_path = generate_report("activity", report_data, filename)
     
     if report_path:
@@ -2369,19 +2369,26 @@ def get_all_users():
 # ------------------- Main Application Setup -------------------
 def create_main_window():
     """Create the main application window with modernized UI"""
+    # global root, content_frame
+    
+    # root = ctk.CTk()
+    # root.title(f"{APP_CONFIG['name']} v{APP_CONFIG['version']}")
+    # root.geometry("1200x700")
     global root, content_frame
     
     root = ctk.CTk()
     root.title(f"{APP_CONFIG['name']} v{APP_CONFIG['version']}")
-    root.geometry("1200x700")
     
-    # Center window
-    root.update_idletasks()
-    width = root.winfo_width()
-    height = root.winfo_height()
-    x = (root.winfo_screenwidth() // 2) - (width // 2)
-    y = (root.winfo_screenheight() // 2) - (height // 2)
-    root.geometry(f"{width}x{height}+{x}+{y}")
+    # Maximize the window
+    root.state('zoomed')
+    
+    # # Center window
+    # root.update_idletasks()
+    # width = root.winfo_width()
+    # height = root.winfo_height()
+    # x = (root.winfo_screenwidth() // 2) - (width // 2)
+    # y = (root.winfo_screenheight() // 2) - (height // 2)
+    # root.geometry(f"{width}x{height}+{x}+{y}")
     
     # Main frame
     main_frame = ctk.CTkFrame(root, fg_color=COLORS["background"])
