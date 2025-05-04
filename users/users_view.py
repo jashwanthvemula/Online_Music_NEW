@@ -17,7 +17,6 @@ try:
     from db_utils import connect_db, get_current_user, ensure_directories_exist, format_file_size, create_song_card
     USE_CONFIG = True
 except ImportError:
-    print("Warning: db_config.py or db_utils.py not found. Using fallback settings.")
     USE_CONFIG = False
     # Modernized color scheme
     COLORS = {
@@ -2074,14 +2073,12 @@ if __name__ == "__main__":
 
         root = ctk.CTk()
         root.title(f"{APP_CONFIG['name']} - User Interface")
-        root.geometry("1200x700")
         
-        root.update_idletasks()
-        width = root.winfo_width()
-        height = root.winfo_height()
-        x = (root.winfo_screenwidth() // 2) - (width // 2)
-        y = (root.winfo_screenheight() // 2) - (height // 2)
-        root.geometry(f"{width}x{height}+{x}+{y}")
+        # Maximize the window
+        try:
+            root.state('zoomed')  # For Windows and Linux
+        except:
+            root.attributes('-zoomed', True)  # Fallback for cross-platform compatibility
         
         main_frame = ctk.CTkFrame(root, fg_color=COLORS["background"], corner_radius=12)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)

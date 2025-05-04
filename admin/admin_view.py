@@ -20,7 +20,6 @@ try:
     from db_utils import connect_db, hash_password, ensure_directories_exist, generate_report, open_file, get_admin_info, format_file_size
     USE_CONFIG = True
 except ImportError:
-    print("Warning: db_config.py or db_utils.py not found. Using fallback settings.")
     USE_CONFIG = False
     # Modernized color scheme
     COLORS = {

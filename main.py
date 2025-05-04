@@ -33,16 +33,6 @@ def create_database():
         
         # Create Users table
         print("Creating Users table...")
-        # Create Users table
-        print("Creating Users table...")
-        cursor.execute("""
-        ALTER TABLE Users ADD COLUMN is_active BOOLEAN DEFAULT TRUE,
-        )
-        """)        
-        cursor.execute("""
-                ALTER TABLE Songs ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1,)
-        """)
-
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Users (
             user_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -50,9 +40,10 @@ def create_database():
             last_name VARCHAR(50) NOT NULL,
             email VARCHAR(100) NOT NULL UNIQUE,
             password VARCHAR(64) NOT NULL,
-            is_admin BOOLEAN DEFAULT FALSE,
-            is_active BOOLEAN DEFAULT TRUE,  # New field, default to active
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            is_admin TINYINT(1) DEFAULT 0,
+            is_active TINYINT(1) DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            secret_key VARCHAR(64)
         )
         """)
         
@@ -103,6 +94,7 @@ def create_database():
             file_type VARCHAR(10) NOT NULL,
             file_size INT NOT NULL,
             upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
             FOREIGN KEY (artist_id) REFERENCES Artists(artist_id) ON DELETE SET NULL,
             FOREIGN KEY (album_id) REFERENCES Albums(album_id) ON DELETE SET NULL,
             FOREIGN KEY (genre_id) REFERENCES Genres(genre_id) ON DELETE SET NULL
